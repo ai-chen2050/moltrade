@@ -71,6 +71,8 @@ cache/
 
 # Trading Bot Specific
 config.json
+config.toml
+
 trade_history_*.json
 backtest_results*.json
 live_*.log
@@ -85,6 +87,7 @@ nohup.out
 *private_key*
 *api_key*
 *secret*
+data/
 
 # Memory files (optional - uncomment if you want to keep them private)
 # memory/
