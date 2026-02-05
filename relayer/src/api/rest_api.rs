@@ -1,6 +1,6 @@
 use axum::{
     Router,
-    extract::{Query, State},
+    extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::Json,
     routing::{delete, get, post},
@@ -12,6 +12,7 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tokio_postgres::error::SqlState;
 
 use crate::api::metrics::Metrics;
 use crate::core::dedupe_engine::DeduplicationEngine;
@@ -91,7 +92,11 @@ pub fn create_router(
         .route("/api/relays/remove", delete(remove_relay))
         .route("/api/bots/register", post(register_bot))
         .route("/api/subscriptions", post(add_subscription))
-        .route("/api/subscriptions/:bot_pubkey", get(list_subscriptions))
+        .route("/api/subscriptions/{bot_pubkey}", get(list_subscriptions))
+        .route(
+            "/api/subscriptions/by-eth/{eth_address}",
+            get(list_subscriptions_by_eth),
+        )
         .route("/api/trades/record", post(record_trade))
         .route("/api/trades/settlement", post(update_trade_settlement))
         .route("/api/credits", get(list_credits))
@@ -299,6 +304,10 @@ async fn register_bot(
     State(state): State<AppState>,
     Json(payload): Json<RegisterBotRequest>,
 ) -> Result<Json<RegisterBotResponse>, StatusCode> {
+    if !is_valid_eth_address(&payload.eth_address) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
     let svc = match &state.subscriptions {
         Some(s) => s,
         None => return Err(StatusCode::SERVICE_UNAVAILABLE),
@@ -371,6 +380,15 @@ async fn record_trade(
         None => return Err(StatusCode::SERVICE_UNAVAILABLE),
     };
 
+    // Ensure bot exists to avoid FK errors
+    let exists = svc.bot_exists(&payload.bot_pubkey).await.map_err(|e| {
+        tracing::error!("Failed to verify bot before recording trade: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    if !exists {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
     svc.record_trade_tx(
         &payload.bot_pubkey,
         payload.follower_pubkey.as_deref(),
@@ -383,7 +401,22 @@ async fn record_trade(
     )
     .await
     .map_err(|e| {
-        tracing::error!("Failed to record trade tx: {}", e);
+        if let Some(db_err) = e.downcast_ref::<tokio_postgres::Error>() {
+            if let Some(code) = db_err.code() {
+                if code == &SqlState::FOREIGN_KEY_VIOLATION {
+                    tracing::warn!(
+                        "record_trade foreign key violation (bot missing?): {}",
+                        db_err
+                    );
+                    return StatusCode::BAD_REQUEST;
+                }
+                if code == &SqlState::UNIQUE_VIOLATION {
+                    tracing::warn!("record_trade duplicate tx_hash: {}", db_err);
+                    return StatusCode::OK; // idempotent insert
+                }
+            }
+        }
+        tracing::error!("Failed to record trade tx: {:?}", e);
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
@@ -467,6 +500,15 @@ fn is_token_valid(headers: &HeaderMap, expected: Option<&str>) -> bool {
     }
 }
 
+fn is_valid_eth_address(addr: &str) -> bool {
+    if addr.len() != 42 || !addr.starts_with("0x") {
+        return false;
+    }
+    addr.as_bytes()[2..]
+        .iter()
+        .all(|b| (*b as char).is_ascii_hexdigit())
+}
+
 async fn enforce_subscription_limit(state: &AppState, eth_addr: &str) -> Result<(), StatusCode> {
     if state.subscription_daily_limit == 0 {
         return Ok(());
@@ -488,11 +530,46 @@ async fn enforce_subscription_limit(state: &AppState, eth_addr: &str) -> Result<
 /// List subscriptions for a bot
 async fn list_subscriptions(
     State(state): State<AppState>,
-    axum::extract::Path(bot_pubkey): axum::extract::Path<String>,
+    Path(bot_pubkey): Path<String>,
 ) -> Result<Json<SubscriptionsResponse>, StatusCode> {
     let svc = match &state.subscriptions {
         Some(s) => s,
         None => return Err(StatusCode::SERVICE_UNAVAILABLE),
+    };
+
+    let subs = svc.list_subscriptions(&bot_pubkey).await.map_err(|e| {
+        tracing::error!("Failed to list subscriptions: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    Ok(Json(SubscriptionsResponse {
+        subscriptions: subs
+            .into_iter()
+            .map(|s| SubscriptionItem {
+                follower_pubkey: s.follower_pubkey,
+            })
+            .collect(),
+    }))
+}
+
+/// List subscriptions for a bot resolved by eth address
+async fn list_subscriptions_by_eth(
+    State(state): State<AppState>,
+    Path(eth_address): Path<String>,
+) -> Result<Json<SubscriptionsResponse>, StatusCode> {
+    let svc = match &state.subscriptions {
+        Some(s) => s,
+        None => return Err(StatusCode::SERVICE_UNAVAILABLE),
+    };
+
+    let bot = svc.find_bot_by_eth(&eth_address).await.map_err(|e| {
+        tracing::error!("Failed to lookup bot by eth address: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let bot_pubkey = match bot {
+        Some(b) => b.bot_pubkey,
+        None => return Err(StatusCode::NOT_FOUND),
     };
 
     let subs = svc.list_subscriptions(&bot_pubkey).await.map_err(|e| {

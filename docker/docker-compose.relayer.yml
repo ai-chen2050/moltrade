@@ -1,0 +1,36 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: moltrade
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  relayer:
+    build: ../relayer
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["moltrade-relayer", "--config", "/etc/moltrade-relayer/config.toml"]
+    environment:
+      RUST_LOG: moltrade_relayer=info
+    volumes:
+      - ./relayer.config.toml:/etc/moltrade-relayer/config.toml:ro
+    ports:
+      - "8080:8080"  # REST + WebSocket
+      - "9090:9090"  # Prometheus metrics
+
+volumes:
+  postgres_data:
+    driver: local

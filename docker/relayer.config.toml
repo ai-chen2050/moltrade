@@ -1,0 +1,47 @@
+# Relayer config for docker-compose
+[relay]
+bootstrap_relays = ["ws://62.72.41.239:8000"]
+max_connections = 10_000
+health_check_interval = 30
+
+[deduplication]
+hotset_size = 1_000_000
+bloom_capacity = 10_000_000
+lru_size = 100_000
+rocksdb_path = "./data/rocksdb"
+
+[filters]
+allowed_kinds = [30931, 30932, 30933, 30934]
+
+[output]
+websocket_enabled = true
+websocket_port = 8080
+batch_size = 100
+max_latency_ms = 50
+
+[postgres]
+dsn = "postgres://postgres:postgres@postgres:5432/moltrade"
+max_connections = 5
+
+[nostr]
+secret_key = "nsec1..."
+
+[settlement]
+explorer_base = "https://app.hyperliquid.xyz/explorer/transaction"
+poll_secs = 30
+batch_limit = 50
+token = ""
+
+[settlement.credit]
+leader_rate = 0.002
+follower_rate = 0.001
+min_credit = 0.5
+profit_multiplier = 1.2
+enable = true
+
+[subscriptions]
+daily_limit = 1000
+
+[monitoring]
+prometheus_port = 9090
+log_level = "info"

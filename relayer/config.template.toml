@@ -1,71 +1,52 @@
-# Relay configuration
-[relay]
-bootstrap_relays = [
-    "ws://62.72.41.239:8000",
-    # "wss://relay.damus.io",
-    # "wss://nostr.wine",
-    # "wss://relay.snort.social",
-]
-max_connections = 10000
-health_check_interval = 30
-
-# Deduplication configuration
 [deduplication]
-hotset_size = 1_000_000
-bloom_capacity = 10_000_000
-lru_size = 100_000
+bloom_capacity = 10000000
+hotset_size = 1000000
+lru_size = 100000
 rocksdb_path = "./data/rocksdb"
 
-# Nostr filtering configuration
 [filters]
-allowed_kinds = [30931, 30932, 30933, 30934]
+allowed_kinds = [
+    30931,
+    30932,
+    30933,
+    30934,
+]
 
-# Output configuration
+[monitoring]
+log_level = "debug"
+prometheus_port = 9090
+
+[nostr]
+secret_key = "nsec1kk97xcsmpdnh9e009f5987gtwh2jm0p3syvcva55ua98hvv3sk5sw2rt7k"
+
 [output]
+batch_size = 100
+bind_address = "127.0.0.1"
+max_latency_ms = 50
 websocket_enabled = false
 websocket_port = 8080
-batch_size = 100
-max_latency_ms = 50
 
-# Postgres configuration (used for subscriptions/fanout)
 [postgres]
 dsn = "postgres://postgres:postgres@localhost:5432/moltrade"
 max_connections = 5
 
-# Nostr platform key (used to decrypt inbound and encrypt outbound)
-[nostr]
-# nsec... or hex sk
-secret_key = "nsec1..."
+[relay]
+bootstrap_relays = ["ws://62.72.41.239:8000"]
+health_check_interval = 30
+max_connections = 10000
 
-# Settlement worker (Hyperliquid tx hash polling)
 [settlement]
-# Base URL for tx lookup (defaults to Hyperliquid explorer tx endpoint)
-explorer_base = "https://app.hyperliquid.xyz/explorer/transaction"
-# Polling interval seconds
-poll_secs = 30
-# Max pending trades to check per tick
 batch_limit = 50
-# Optional shared token for settlement/reporting endpoints
+explorer_base = "https://app.hyperliquid.xyz/explorer/transaction"
+poll_secs = 30
 token = ""
 
-# Credit issuance config
 [settlement.credit]
-# Applied to leader trades (uses notional size * price * rate)
-leader_rate = 0.002
-# Applied to follower trades
-follower_rate = 0.001
-# Floor credit per confirmed trade
-min_credit = 0.5
-# Multiplier when pnl_usd > 0 (profit-making trades)
-profit_multiplier = 1.2
 enable = true
+follower_rate = 0.001
+leader_rate = 0.002
+min_credit = 0.5
+profit_multiplier = 1.2
 
-# Subscription limits
 [subscriptions]
-# Daily POST limit for subscription endpoints (per bot eth_address). 0 disables limiting.
 daily_limit = 1000
-
-# Monitoring configuration
-[monitoring]
-prometheus_port = 9090
-log_level = "debug"

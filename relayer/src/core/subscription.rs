@@ -120,15 +120,19 @@ impl SubscriptionService {
                     role TEXT NOT NULL CHECK (role IN ('leader','follower')),
                     symbol TEXT NOT NULL,
                     side TEXT NOT NULL,
-                    size NUMERIC NOT NULL,
-                    price NUMERIC NOT NULL,
+                    size DOUBLE PRECISION NOT NULL,
+                    price DOUBLE PRECISION NOT NULL,
                     tx_hash TEXT NOT NULL UNIQUE,
                     status TEXT NOT NULL DEFAULT 'pending',
-                    pnl NUMERIC NULL,
-                    pnl_usd NUMERIC NULL,
+                    pnl DOUBLE PRECISION NULL,
+                    pnl_usd DOUBLE PRECISION NULL,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
                 );
+                ALTER TABLE trade_executions ALTER COLUMN size TYPE DOUBLE PRECISION USING size::double precision;
+                ALTER TABLE trade_executions ALTER COLUMN price TYPE DOUBLE PRECISION USING price::double precision;
+                ALTER TABLE trade_executions ALTER COLUMN pnl TYPE DOUBLE PRECISION USING pnl::double precision;
+                ALTER TABLE trade_executions ALTER COLUMN pnl_usd TYPE DOUBLE PRECISION USING pnl_usd::double precision;
                 CREATE TABLE IF NOT EXISTS credits (
                     bot_pubkey TEXT NOT NULL REFERENCES bots(bot_pubkey) ON DELETE CASCADE,
                     follower_pubkey TEXT NOT NULL,
@@ -251,6 +255,15 @@ impl SubscriptionService {
             .context("Failed to query bot eth address")?;
 
         Ok(row.map(|r| r.get(0)))
+    }
+
+    pub async fn bot_exists(&self, bot_pubkey: &str) -> Result<bool> {
+        let client = self.pool.get().await.context("Failed to get PG client")?;
+        let row = client
+            .query_opt("SELECT 1 FROM bots WHERE bot_pubkey = $1", &[&bot_pubkey])
+            .await
+            .context("Failed to query bot existence")?;
+        Ok(row.is_some())
     }
 
     pub async fn update_bot_last_seen(&self, bot_pubkey: &str) -> Result<()> {

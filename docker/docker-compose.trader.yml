@@ -1,0 +1,14 @@
+version: "3.9"
+
+services:
+  trader:
+    image: python:3.11-slim
+    working_dir: /app
+    volumes:
+      - ../trader:/app:ro
+      - ./trader.config.json:/app/config.json:ro
+    environment:
+      PYTHONUNBUFFERED: "1"
+    command: >-
+      bash -c "pip install --no-cache-dir -r requirements.txt && \
+      python main.py --config /app/config.json --test --strategy momentum --symbol HYPE"

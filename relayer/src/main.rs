@@ -16,6 +16,7 @@ use flume::Receiver;
 use nostr_sdk::Event;
 use nostr_sdk::ToBech32;
 use nostr_sdk::prelude::{Client, Keys};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 use storage::rocksdb_store::RocksDBStore;
@@ -38,7 +39,7 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     // Load config if provided
-    let cfg = load_config(&cli)?;
+    let (cfg, cfg_path) = load_config(&cli)?;
 
     // Initialize tracing - prefer config log level if provided, else env, else default
     init_tracing(&cfg);
@@ -66,7 +67,7 @@ async fn main() -> Result<()> {
     // Initialize relay pool
     let (health_check_interval, max_connections) = relay_settings(&cfg);
     let allowed_kinds = resolve_allowed_kinds(&cfg);
-    let nostr_keys = load_nostr_keys(&cfg)?;
+    let nostr_keys = load_nostr_keys(&cfg, cfg_path.as_deref())?;
     let platform_pubkey = nostr_keys.as_ref().map(|k| {
         k.public_key()
             .to_bech32()
@@ -197,8 +198,8 @@ async fn main() -> Result<()> {
 
     // Start HTTP server
     let addr = match &cfg {
-        Some(c) => format!("0.0.0.0:{}", c.output.websocket_port),
-        None => "0.0.0.0:8080".to_string(),
+        Some(c) => format!("{}:{}", c.output.bind_address, c.output.websocket_port),
+        None => "127.0.0.1:8080".to_string(),
     };
     info!("Starting HTTP server on {}", addr);
     let server_addr_for_logs = addr.clone();
@@ -254,10 +255,10 @@ async fn load_relay_urls() -> Result<Vec<String>> {
     ])
 }
 
-fn load_config(cli: &Cli) -> Result<Option<AppConfig>> {
+fn load_config(cli: &Cli) -> Result<(Option<AppConfig>, Option<PathBuf>)> {
     match &cli.config {
-        Some(path) => Ok(Some(AppConfig::load_from_path(path)?)),
-        None => Ok(None),
+        Some(path) => Ok((Some(AppConfig::load_from_path(path)?), Some(path.clone()))),
+        None => Ok((None, None)),
     }
 }
 
@@ -320,13 +321,65 @@ fn resolve_allowed_kinds(cfg: &Option<AppConfig>) -> Option<Vec<u16>> {
         .filter(|kinds| !kinds.is_empty())
 }
 
-fn load_nostr_keys(cfg: &Option<AppConfig>) -> Result<Option<Keys>> {
+fn load_nostr_keys(cfg: &Option<AppConfig>, cfg_path: Option<&Path>) -> Result<Option<Keys>> {
     if let Some(nostr) = cfg.as_ref().and_then(|c| c.nostr.as_ref()) {
-        let keys = Keys::parse(&nostr.secret_key).context("Failed to parse nostr secret key")?;
-        Ok(Some(keys))
+        let secret = nostr.secret_key.trim();
+
+        if secret.is_empty() {
+            let keys = Keys::generate();
+            persist_generated_secret(cfg_path, &keys)?;
+            return Ok(Some(keys));
+        }
+
+        match Keys::parse(secret) {
+            Ok(keys) => Ok(Some(keys)),
+            Err(_) => {
+                warn!("Invalid nostr secret key in config; generating a new one.");
+                let keys = Keys::generate();
+                persist_generated_secret(cfg_path, &keys)?;
+                Ok(Some(keys))
+            }
+        }
     } else {
         Ok(None)
     }
+}
+
+fn persist_generated_secret(cfg_path: Option<&Path>, keys: &Keys) -> Result<()> {
+    let nsec = keys
+        .secret_key()
+        .to_bech32()
+        .context("Failed to encode generated secret key")?;
+
+    if let Some(path) = cfg_path {
+        if let Ok(contents) = std::fs::read_to_string(path) {
+            match toml::from_str::<toml::Value>(&contents) {
+                Ok(mut value) => {
+                    value["nostr"]["secret_key"] = toml::Value::String(nsec.clone());
+                    match toml::to_string_pretty(&value) {
+                        Ok(serialized) => {
+                            if let Err(e) = std::fs::write(path, serialized) {
+                                warn!("Failed to write generated nostr key to config: {}", e);
+                            }
+                        }
+                        Err(e) => {
+                            warn!("Failed to serialize config with generated nostr key: {}", e)
+                        }
+                    }
+                }
+                Err(e) => warn!(
+                    "Failed to parse config TOML for nostr key persistence: {}",
+                    e
+                ),
+            }
+        } else {
+            warn!("Failed to read config file for nostr key persistence");
+        }
+    } else {
+        warn!("No config path provided; generated nostr key will not be persisted to file.");
+    }
+
+    Ok(())
 }
 
 async fn init_nostr_publisher(

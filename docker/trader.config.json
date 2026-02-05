@@ -1,0 +1,75 @@
+{
+    "wallet_address": "0x_your_wallet",
+    "private_key": "your_private_key_here",
+    "telegram": {
+        "enabled": false,
+        "bot_token": "",
+        "chat_id": "",
+        "notify_startup": true,
+        "notify_signals": true,
+        "notify_trades": true,
+        "notify_closures": true,
+        "notify_errors": true,
+        "notify_daily_summary": true
+    },
+    "trading": {
+        "exchange": "hyperliquid",
+        "default_symbol": "HYPE",
+        "default_strategy": "test",
+        "position_size": 0.08,
+        "max_position_size": 0.2,
+        "stop_loss_percent": 0.03,
+        "take_profit_percent": 0.08
+    },
+    "strategies": {
+        "momentum": {
+            "rsi_period": 14,
+            "rsi_oversold": 30,
+            "rsi_overbought": 70,
+            "macd_fast": 12,
+            "macd_slow": 26,
+            "macd_signal": 9
+        },
+        "mean_reversion": {
+            "bollinger_period": 20,
+            "bollinger_std": 2,
+            "rsi_period": 14,
+            "rsi_oversold": 30,
+            "rsi_overbought": 70
+        },
+        "grid": {
+            "grid_levels": 10,
+            "grid_range_percent": 0.1,
+            "order_size_percent": 0.05
+        },
+        "trend_following": {
+            "min_trade_interval": 14400,
+            "min_adx": 30
+        }
+    },
+    "risk_management": {
+        "max_daily_loss": 0.05,
+        "max_trades_per_day": 8,
+        "cool_down_seconds": 300
+    },
+    "nostr": {
+        "nsec": "nsec1yourprivatekey",
+        "platform_shared_key": "64_hex_shared_key_from_platform",
+        "relays": [
+            "wss://nostr.parallel.hetu.org:8443"
+        ],
+        "sid": "subspace_op",
+        "role": "bot"
+    },
+    "copytrade": {
+        "enabled": false,
+        "follow_pubkeys": [
+            "npub_of_leader"
+        ],
+        "symbols": [
+            "HYPE"
+        ],
+        "size_pct": 0.05,
+        "min_order_value": 10.0
+    }
+}

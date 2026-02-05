@@ -107,20 +107,17 @@ update: ## Update all dependencies to latest compatible version
 # ============================================================================
 # Run targets
 # ============================================================================
-run: build ## Run release version
-	@echo "🚀 Running release version..."
-	@$(RELEASE_BINARY)
-
-debug: dev ## Run development version (debug mode)
-	@echo "🚀 Running development version..."
-	@$(DEBUG_BINARY) --config config.template.toml
-
-run-with-config: build ## Run release version using config file
+run: build ## Run release version using config file
 	@echo "🚀 Running with config file..."
 	@if [ ! -f config.toml ]; then \
 		echo "⚠️  config.toml not found, using default config"; \
 	fi
 	@$(RELEASE_BINARY) --config config.toml
+
+
+debug: dev ## Run development version (debug mode)
+	@echo "🚀 Running development version..."
+	@$(DEBUG_BINARY) --config config.template.toml
 
 # ============================================================================
 # Test and check targets

@@ -59,10 +59,10 @@ Rust service that ingests Nostr events, deduplicates, forwards to downstreams, a
 
 3. **Compile and run**
    ```bash
-   make build      # Build the project
-   make run        # Run the project
+   make build                  # Build the project
+   make run                    # Run the project with config.toml
    # Or
-   make dev        # Development mode (debug build)
+   make dev                    # Dev mode (debug build) with config.template.toml
    ```
 
 ### Using Makefile
@@ -154,6 +154,7 @@ lru_size = 50000                # LRU cache size
 # Output configuration
 websocket_enabled = true        # Enable WebSocket
 websocket_port = 8080           # WebSocket port
+bind_address = "127.0.0.1"      # Bind address for REST/WebSocket
 batch_size = 100                # Batch processing size
 max_latency_ms = 100            # Maximum latency (milliseconds)
 

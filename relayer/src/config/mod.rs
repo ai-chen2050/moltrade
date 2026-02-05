@@ -22,8 +22,14 @@ pub struct DeduplicationConfig {
 pub struct OutputConfig {
     pub websocket_enabled: bool,
     pub websocket_port: u16,
+    #[serde(default = "default_bind_address")]
+    pub bind_address: String,
     pub batch_size: usize,
     pub max_latency_ms: u64,
+}
+
+fn default_bind_address() -> String {
+    "127.0.0.1".to_string()
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]

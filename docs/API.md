@@ -84,6 +84,12 @@ List subscriptions for a bot:
 curl http://localhost:8080/api/subscriptions/<bot_pubkey>
 ```
 
+List subscriptions for a bot by eth address (bot_pubkey == eth_address for EVM bots):
+
+```bash
+curl http://localhost:8080/api/subscriptions/by-eth/<eth_address>
+```
+
 Notes: subscription POSTs are rate-limited per bot `eth_address` via `[subscriptions].daily_limit` (default 1000; set to 0 to disable). GET is unrestricted. Exceeding the limit returns HTTP 429.
 
 ### Trades

@@ -98,6 +98,18 @@
     ```
     The bot will start, generate a Nostr key pair for communication, and await configuration via its local API or admin panel.
 
+## **Docker Setup**
+
+**For Relayer:**
+```bash
+cd docker && docker compose -f docker-compose.relayer.yml up --build
+```
+
+**For Trader:**
+```bash
+cd docker && docker compose -f docker-compose.trader.yml up
+```
+
 ## **Architecture & Integration with Your Ecosystem**
 
 - **Core (MVP)**: This `moltrade-bot` and the cloud relay form the self-sustaining MVP.
