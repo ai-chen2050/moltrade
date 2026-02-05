@@ -21,6 +21,7 @@ pub struct AppState {
     pub dedupe: Arc<DeduplicationEngine>,
     pub metrics: Arc<Metrics>,
     pub subscriptions: Option<Arc<SubscriptionService>>,
+    pub platform_pubkey: Option<String>,
 }
 
 /// Create the REST API router
@@ -29,12 +30,14 @@ pub fn create_router(
     dedupe: Arc<DeduplicationEngine>,
     metrics: Arc<Metrics>,
     subscriptions: Option<Arc<SubscriptionService>>,
+    platform_pubkey: Option<String>,
 ) -> Router {
     let state = AppState {
         pool,
         dedupe,
         metrics,
         subscriptions,
+        platform_pubkey,
     };
     Router::new()
         .route("/health", get(health))
@@ -170,7 +173,16 @@ async fn list_relays(State(state): State<AppState>) -> Json<serde_json::Value> {
 #[derive(Debug, Deserialize)]
 struct RegisterBotRequest {
     bot_pubkey: String,
+    nostr_pubkey: String,
+    eth_address: String,
     name: String,
+}
+
+#[derive(Debug, Serialize)]
+struct RegisterBotResponse {
+    success: bool,
+    message: String,
+    platform_pubkey: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -194,22 +206,28 @@ struct SubscriptionItem {
 async fn register_bot(
     State(state): State<AppState>,
     Json(payload): Json<RegisterBotRequest>,
-) -> Result<Json<RelayResponse>, StatusCode> {
+) -> Result<Json<RegisterBotResponse>, StatusCode> {
     let svc = match &state.subscriptions {
         Some(s) => s,
         None => return Err(StatusCode::SERVICE_UNAVAILABLE),
     };
 
-    svc.register_bot(&payload.bot_pubkey, &payload.name)
+    svc.register_bot(
+        &payload.bot_pubkey,
+        &payload.nostr_pubkey,
+        &payload.eth_address,
+        &payload.name,
+    )
         .await
         .map_err(|e| {
             tracing::error!("Failed to register bot: {}", e);
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
-    Ok(Json(RelayResponse {
+    Ok(Json(RegisterBotResponse {
         success: true,
         message: "bot registered".to_string(),
+        platform_pubkey: state.platform_pubkey.clone(),
     }))
 }
 

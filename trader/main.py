@@ -15,6 +15,7 @@ from strategies.strategies import get_strategy
 from telegram_notifier import get_notifier
 from nostr.signal_service import SignalBroadcaster
 from nostr.copytrade_listener import CopyTradeListener
+from pynostr.key import PrivateKey
 
 logging.basicConfig(
     level=logging.INFO,
@@ -80,8 +81,33 @@ class ImprovedTradingBot:
 
     def _load_config(self, config_path: str) -> Dict:
         """Load configuration file"""
-        with open(config_path, 'r') as f:
-            return json.load(f)
+        path = Path(config_path)
+        with path.open('r') as f:
+            config = json.load(f)
+
+        # Auto-provision nostr keys and relays if missing to improve UX
+        nostr_cfg = config.setdefault('nostr', {})
+        updated = False
+
+        nsec = nostr_cfg.get('nsec')
+        relays = nostr_cfg.get('relays', [])
+        if not nsec:
+            priv = PrivateKey()
+            nostr_cfg['nsec'] = priv.bech32()
+            nostr_cfg['npub'] = priv.public_key.bech32()
+            updated = True
+            logger.info("Generated nostr keypair and wrote to config.json")
+
+        if not relays:
+            nostr_cfg['relays'] = ["wss://nostr.parallel.hetu.org:8443"]
+            updated = True
+
+        if updated:
+            with path.open('w') as f:
+                json.dump(config, f, indent=2, ensure_ascii=False)
+                f.write('\n')
+
+        return config
 
     def sync_positions(self, symbol: str):
         """Synchronize position status (from API)"""

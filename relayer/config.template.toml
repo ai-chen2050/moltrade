@@ -36,6 +36,11 @@ max_latency_ms = 50
 dsn = "postgres://postgres:postgres@localhost:5432/moltrade"
 max_connections = 5
 
+# Nostr platform key (used to decrypt inbound and encrypt outbound)
+[nostr]
+# nsec... or hex sk
+secret_key = "nsec1..."
+
 # Monitoring configuration
 [monitoring]
 prometheus_port = 9090

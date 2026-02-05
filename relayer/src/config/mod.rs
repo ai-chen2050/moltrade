@@ -58,6 +58,12 @@ fn default_pg_pool_size() -> usize {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct NostrConfig {
+    /// Platform nostr nsec (hex or bech32) used to decrypt inbound and encrypt outbound
+    pub secret_key: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct AppConfig {
     pub relay: RelayConfig,
     pub deduplication: DeduplicationConfig,
@@ -66,6 +72,8 @@ pub struct AppConfig {
     pub filters: FilterConfig,
     #[serde(default)]
     pub postgres: Option<PostgresConfig>,
+    #[serde(default)]
+    pub nostr: Option<NostrConfig>,
     pub monitoring: MonitoringConfig,
 }
 

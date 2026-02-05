@@ -18,7 +18,7 @@ path = "examples/downstream.rs"
 [dependencies]
 tokio = { version = "1.48.0", features = ["full"] }
 axum = { version = "0.8.6", features = ["ws"] } # HTTP Server with WebSocket
-nostr-sdk = "0.44.1" # Nostr protocol
+nostr-sdk = { version = "0.44.1", features = ["nip04"] } # Nostr protocol
 rocksdb = "0.24.0" # Persistent storage
 bloom = "0.3.2" # Bloom filter
 lru = "0.16.2" # LRU cache

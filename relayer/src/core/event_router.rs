@@ -1,6 +1,7 @@
 use anyhow::Result;
 use flume::{Receiver, Sender};
 use nostr_sdk::Event;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
@@ -9,6 +10,11 @@ use tracing::{debug, error, info};
 use crate::api::metrics::Metrics;
 use crate::core::dedupe_engine::DeduplicationEngine;
 use crate::core::subscription::{FanoutMessage, SubscriptionService};
+use nostr_sdk::Kind;
+use nostr_sdk::nips::nip04;
+use nostr_sdk::prelude::{Client, EventBuilder, Keys, PublicKey, Tag};
+use serde_json;
+use std::str::FromStr;
 
 /// Wrapper for Event to enable sorting by timestamp
 #[derive(Clone)]
@@ -46,7 +52,10 @@ pub struct EventRouter {
     allowed_kinds: Option<Vec<u16>>,
     fanout_tx: Option<Sender<FanoutMessage>>,
     subscription_service: Option<Arc<SubscriptionService>>,
+    nostr_keys: Option<Keys>,
+    nostr_client: Option<Arc<Client>>,
     pending_events: Arc<RwLock<Vec<EventWrapper>>>,
+    heartbeat_seen: Option<Arc<RwLock<HashMap<String, Instant>>>>,
     metrics: Option<Arc<Metrics>>,
 }
 
@@ -60,7 +69,13 @@ impl EventRouter {
         allowed_kinds: Option<Vec<u16>>,
         fanout_tx: Option<Sender<FanoutMessage>>,
         subscription_service: Option<Arc<SubscriptionService>>,
+        nostr_keys: Option<Keys>,
+        nostr_client: Option<Arc<Client>>,
     ) -> Self {
+        let heartbeat_seen = subscription_service
+            .as_ref()
+            .map(|_| Arc::new(RwLock::new(HashMap::new())));
+
         Self {
             dedupe_engine,
             batch_size,
@@ -69,7 +84,10 @@ impl EventRouter {
             allowed_kinds,
             fanout_tx,
             subscription_service,
+            nostr_keys,
+            nostr_client,
             pending_events: Arc::new(RwLock::new(Vec::new())),
+            heartbeat_seen,
             metrics: None,
         }
     }
@@ -172,20 +190,9 @@ impl EventRouter {
 
         // Send events to downstream in timestamp order
         for event in batch {
-            // If subscription service is configured, fanout encrypted payloads to subscribers
-            if let (Some(subs), Some(fanout_tx)) = (&self.subscription_service, &self.fanout_tx) {
-                match subs.fanout_for_event(&event).await {
-                    Ok(fanouts) => {
-                        for msg in fanouts {
-                            if let Err(e) = fanout_tx.send_async(msg).await {
-                                error!("Failed to send fanout message: {}", e);
-                            }
-                        }
-                    }
-                    Err(err) => {
-                        error!("Fanout processing failed: {}", err);
-                    }
-                }
+            self.maybe_update_last_seen(&event).await;
+            if let Err(e) = self.handle_copytrade_fanout(&event).await {
+                error!("Fanout processing failed: {}", e);
             }
             if let Err(e) = self.downstream_tx.send_async(event).await {
                 error!("Failed to send event to downstream: {}", e);
@@ -228,4 +235,152 @@ impl EventRouter {
         }
         Ok(())
     }
+
+    async fn handle_copytrade_fanout(&self, event: &Event) -> Result<()> {
+        // Preconditions: need subscription service and platform nostr keys
+        let subs = match &self.subscription_service {
+            Some(s) => s,
+            None => return Ok(()),
+        };
+        let nostr_keys = match &self.nostr_keys {
+            Some(k) => k,
+            None => return Ok(()),
+        };
+
+        // Decrypt content using platform key and sender pubkey
+        let plaintext = match nip04::decrypt(nostr_keys.secret_key(), &event.pubkey, &event.content)
+        {
+            Ok(p) => p,
+            Err(e) => {
+                error!("Failed to decrypt event {}: {}", event.id.to_hex(), e);
+                return Ok(());
+            }
+        };
+
+        // Extract agent eth address from JSON payload
+        let agent_eth = extract_agent_eth(&plaintext)
+            .ok_or_else(|| anyhow::anyhow!("agent eth address missing"))?;
+
+        // Find leader bot by eth address
+        let bot = match subs.find_bot_by_eth(&agent_eth).await? {
+            Some(b) => b,
+            None => {
+                error!("No bot registered for eth address {}", agent_eth);
+                return Ok(());
+            }
+        };
+
+        // Followers for this bot
+        let followers = subs.list_subscriptions(&bot.bot_pubkey).await?;
+        if followers.is_empty() {
+            return Ok(());
+        }
+
+        // Fanout over WebSocket (plaintext)
+        if let Some(fanout_tx) = &self.fanout_tx {
+            for follower in &followers {
+                let msg = FanoutMessage {
+                    target_pubkey: follower.follower_pubkey.clone(),
+                    bot_pubkey: bot.bot_pubkey.clone(),
+                    kind: event.kind.as_u16(),
+                    original_event_id: event.id.to_hex(),
+                    payload: plaintext.clone(),
+                };
+                if let Err(e) = fanout_tx.send_async(msg).await {
+                    error!("Failed to send fanout ws payload: {}", e);
+                }
+            }
+        }
+
+        // Publish encrypted nostr events to followers if client exists
+        if let Some(client) = &self.nostr_client {
+            for follower in followers {
+                let follower_pk = match PublicKey::from_str(&follower.follower_pubkey) {
+                    Ok(pk) => pk,
+                    Err(e) => {
+                        error!(
+                            "Invalid follower pubkey {}: {}",
+                            follower.follower_pubkey, e
+                        );
+                        continue;
+                    }
+                };
+
+                let encrypted =
+                    match nip04::encrypt(nostr_keys.secret_key(), &follower_pk, &plaintext) {
+                        Ok(ct) => ct,
+                        Err(e) => {
+                            error!(
+                                "Encrypt for follower {} failed: {}",
+                                follower.follower_pubkey, e
+                            );
+                            continue;
+                        }
+                    };
+
+                let mut builder = EventBuilder::new(Kind::Custom(event.kind.as_u16()), encrypted);
+                builder = builder.tag(Tag::public_key(follower_pk));
+
+                if let Err(e) = client.send_event_builder(builder).await {
+                    error!(
+                        "Publish to follower {} failed: {}",
+                        follower.follower_pubkey, e
+                    );
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl EventRouter {
+    async fn maybe_update_last_seen(&self, event: &Event) {
+        const HEARTBEAT_KIND: u16 = 30934;
+        const MIN_INTERVAL: Duration = Duration::from_secs(15 * 60);
+
+        if event.kind.as_u16() != HEARTBEAT_KIND {
+            return;
+        }
+
+        let subs = match &self.subscription_service {
+            Some(s) => s,
+            None => return,
+        };
+
+        let cache = match &self.heartbeat_seen {
+            Some(c) => c,
+            None => return,
+        };
+
+        let bot_pubkey = event.pubkey.to_hex();
+        let now = Instant::now();
+
+        let should_update = {
+            let mut guard = cache.write().await;
+            match guard.get(&bot_pubkey) {
+                Some(last) if now.duration_since(*last) < MIN_INTERVAL => false,
+                _ => {
+                    guard.insert(bot_pubkey.clone(), now);
+                    true
+                }
+            }
+        };
+
+        if should_update {
+            if let Err(e) = subs.update_bot_last_seen(&bot_pubkey).await {
+                error!("Failed to update last_seen for bot {}: {}", bot_pubkey, e);
+            }
+        }
+    }
+}
+
+fn extract_agent_eth(plaintext: &str) -> Option<String> {
+    let parsed: serde_json::Value = serde_json::from_str(plaintext).ok()?;
+    parsed
+        .get("agent_eth_address")
+        .or_else(|| parsed.get("agent"))
+        .or_else(|| parsed.get("eth_address"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
 }

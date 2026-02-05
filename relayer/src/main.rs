@@ -9,8 +9,12 @@ use clap::Parser;
 use config::AppConfig;
 use core::{
     dedupe_engine::DeduplicationEngine, downstream::DownstreamForwarder, event_router::EventRouter,
-    relay_pool::RelayPool, subscription::SubscriptionService,
+    relay_pool::RelayPool, subscription::FanoutMessage, subscription::SubscriptionService,
 };
+use flume::Receiver;
+use nostr_sdk::Event;
+use nostr_sdk::ToBech32;
+use nostr_sdk::prelude::{Client, Keys};
 use std::sync::Arc;
 use std::time::Duration;
 use storage::rocksdb_store::RocksDBStore;
@@ -33,22 +37,10 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     // Load config if provided
-    let cfg: Option<AppConfig> = match &cli.config {
-        Some(path) => Some(AppConfig::load_from_path(path)?),
-        None => None,
-    };
+    let cfg = load_config(&cli)?;
 
     // Initialize tracing - prefer config log level if provided, else env, else default
-    let default_level = cfg
-        .as_ref()
-        .map(|c| c.monitoring.log_level.clone())
-        .unwrap_or_else(|| "info".to_string());
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| format!("moltrade_relayer={}", default_level).into()),
-        )
-        .init();
+    init_tracing(&cfg);
 
     info!("Starting Moltrade Relayer...");
 
@@ -56,27 +48,11 @@ async fn main() -> Result<()> {
     let metrics = Arc::new(Metrics::new().context("Failed to initialize metrics")?);
 
     // Initialize RocksDB storage
-    let rocks_path = cfg
-        .as_ref()
-        .map(|c| c.deduplication.rocksdb_path.as_str())
-        .unwrap_or("./data/rocksdb");
-    let rocksdb =
-        Arc::new(RocksDBStore::new(rocks_path).context("Failed to initialize RocksDB storage")?);
+    let rocksdb = init_rocksdb(&cfg)?;
     info!("RocksDB storage initialized");
 
     // Initialize deduplication engine
-    let dedupe_engine = match &cfg {
-        Some(c) => Arc::new(
-            DeduplicationEngine::new_with_params(
-                rocksdb.clone(),
-                c.deduplication.hotset_size,
-                c.deduplication.bloom_capacity,
-                c.deduplication.lru_size,
-            )
-            .with_metrics(metrics.clone()),
-        ),
-        None => Arc::new(DeduplicationEngine::new(rocksdb.clone()).with_metrics(metrics.clone())),
-    };
+    let dedupe_engine = init_dedupe_engine(&cfg, rocksdb.clone(), metrics.clone());
     info!("Deduplication engine initialized");
 
     // Warm dedup engine from RocksDB successful-forward index to avoid duplicate downstream sends after restart
@@ -87,17 +63,15 @@ async fn main() -> Result<()> {
     dedupe_engine.warm_from_db(warm_limit).await;
 
     // Initialize relay pool
-    let (health_check_interval, max_connections) = match &cfg {
-        Some(c) => (
-            Duration::from_secs(c.relay.health_check_interval),
-            c.relay.max_connections,
-        ),
-        None => (Duration::from_secs(30), 10_000),
-    };
-    let allowed_kinds = cfg
-        .as_ref()
-        .map(|c| c.filters.allowed_kinds.clone())
-        .filter(|kinds| !kinds.is_empty());
+    let (health_check_interval, max_connections) = relay_settings(&cfg);
+    let allowed_kinds = resolve_allowed_kinds(&cfg);
+    let nostr_keys = load_nostr_keys(&cfg)?;
+    let platform_pubkey = nostr_keys.as_ref().map(|k| {
+        k.public_key()
+            .to_bech32()
+            .unwrap_or_else(|_| k.public_key().to_hex())
+    });
+    let nostr_client = init_nostr_publisher(&cfg, nostr_keys.as_ref()).await?;
     let (relay_pool, relay_event_rx) = RelayPool::new(
         health_check_interval,
         max_connections,
@@ -111,10 +85,7 @@ async fn main() -> Result<()> {
     info!("Health checks started");
 
     // Connect to relays (example - load from config file or environment)
-    let relay_urls = match &cfg {
-        Some(c) => c.relay.bootstrap_relays.clone(),
-        None => load_relay_urls().await?,
-    };
+    let relay_urls = bootstrap_relays(&cfg).await?;
     info!("Loading {} relay URLs", relay_urls.len());
 
     relay_pool
@@ -127,14 +98,16 @@ async fn main() -> Result<()> {
     let (downstream_tx, downstream_rx) = flume::unbounded();
 
     // Optional Postgres-backed subscription service for fanout
-    let subscription_service = if let Some(pg) = cfg.as_ref().and_then(|c| c.postgres.as_ref()) {
-        let svc = SubscriptionService::new(&pg.dsn, pg.max_connections)
+    let subscription_service = init_subscription_service(&cfg).await?;
+
+    if let (Some(subs), Some(pk)) = (subscription_service.as_ref(), platform_pubkey.as_ref()) {
+        if let Err(e) = subs
+            .ensure_platform_pubkey(pk, nostr_client.clone(), nostr_keys.as_ref())
             .await
-            .context("Failed to initialize subscription service")?;
-        Some(Arc::new(svc))
-    } else {
-        None
-    };
+        {
+            warn!("Failed to record/publish platform pubkey: {}", e);
+        }
+    }
 
     // Fanout channel (only if subscription service is enabled)
     let (fanout_tx, fanout_rx) = if subscription_service.is_some() {
@@ -153,6 +126,8 @@ async fn main() -> Result<()> {
         allowed_kinds,
         fanout_tx,
         subscription_service.clone(),
+        nostr_keys,
+        nostr_client.clone(),
     )
     .with_metrics(metrics.clone());
 
@@ -169,6 +144,7 @@ async fn main() -> Result<()> {
         dedupe_engine.clone(),
         metrics.clone(),
         subscription_service.clone(),
+        platform_pubkey.clone(),
     );
 
     // Handle downstream forwarding based on config
@@ -177,48 +153,14 @@ async fn main() -> Result<()> {
         .map(|c| c.output.websocket_enabled)
         .unwrap_or(true);
 
-    let app = if websocket_enabled {
-        // Create WebSocket router (share the downstream event stream)
-        let downstream_rx_arc = Arc::new(downstream_rx);
-        let fanout_rx_arc = fanout_rx.map(Arc::new);
-        let ws_router =
-            websocket::create_websocket_router(downstream_rx_arc.clone(), fanout_rx_arc);
-        axum::Router::new().merge(rest_router).merge(ws_router)
-    } else {
-        // Forward events via TCP or HTTP instead of WebSocket
-        let downstream_tcp = cfg
-            .as_ref()
-            .map(|c| c.output.downstream_tcp.clone())
-            .unwrap_or_default();
-        let downstream_rest = cfg
-            .as_ref()
-            .map(|c| c.output.downstream_rest.clone())
-            .unwrap_or_default();
-
-        if !downstream_tcp.is_empty() || !downstream_rest.is_empty() {
-            let forwarder = DownstreamForwarder::new(
-                downstream_tcp.clone(),
-                downstream_rest.clone(),
-                rocksdb.clone(),
-            );
-            let downstream_rx_for_forwarder = downstream_rx;
-            tokio::spawn(async move {
-                if let Err(e) = forwarder.forward_events(downstream_rx_for_forwarder).await {
-                    error!("Downstream forwarder error: {}", e);
-                }
-            });
-            info!(
-                "Downstream forwarding enabled (TCP: {:?}, REST: {:?})",
-                downstream_tcp, downstream_rest
-            );
-        } else {
-            warn!(
-                "websocket_enabled is false but no downstream endpoints configured. Events will be dropped."
-            );
-        }
-
-        axum::Router::new().merge(rest_router)
-    };
+    let app = build_app(
+        &cfg,
+        rest_router,
+        downstream_rx,
+        fanout_rx,
+        websocket_enabled,
+        rocksdb.clone(),
+    );
 
     // Start HTTP server
     let addr = match &cfg {
@@ -244,23 +186,7 @@ async fn main() -> Result<()> {
     info!("Metrics: http://{}/metrics", server_addr_for_logs);
 
     // Periodically update memory usage gauge
-    {
-        let metrics = metrics.clone();
-        tokio::spawn(async move {
-            use sysinfo::{ProcessesToUpdate, System};
-            let mut sys = System::new();
-            loop {
-                sys.refresh_processes(ProcessesToUpdate::All, true);
-                if let Ok(pid) = sysinfo::get_current_pid() {
-                    if let Some(process) = sys.process(pid) {
-                        // memory() returns bytes
-                        metrics.memory_usage.set(process.memory() as f64 / 1024.0);
-                    }
-                }
-                tokio::time::sleep(Duration::from_secs(5)).await;
-            }
-        });
-    }
+    spawn_memory_metrics(metrics.clone());
     // Wait for shutdown signal
     signal::ctrl_c()
         .await
@@ -293,4 +219,187 @@ async fn load_relay_urls() -> Result<Vec<String>> {
         "wss://nos.lol".to_string(),
         "wss://relay.snort.social".to_string(),
     ])
+}
+
+fn load_config(cli: &Cli) -> Result<Option<AppConfig>> {
+    match &cli.config {
+        Some(path) => Ok(Some(AppConfig::load_from_path(path)?)),
+        None => Ok(None),
+    }
+}
+
+fn init_tracing(cfg: &Option<AppConfig>) {
+    let default_level = cfg
+        .as_ref()
+        .map(|c| c.monitoring.log_level.clone())
+        .unwrap_or_else(|| "info".to_string());
+
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| format!("moltrade_relayer={}", default_level).into()),
+        )
+        .init();
+}
+
+fn init_rocksdb(cfg: &Option<AppConfig>) -> Result<Arc<RocksDBStore>> {
+    let rocks_path = cfg
+        .as_ref()
+        .map(|c| c.deduplication.rocksdb_path.as_str())
+        .unwrap_or("./data/rocksdb");
+    Ok(Arc::new(
+        RocksDBStore::new(rocks_path).context("Failed to initialize RocksDB storage")?,
+    ))
+}
+
+fn init_dedupe_engine(
+    cfg: &Option<AppConfig>,
+    rocksdb: Arc<RocksDBStore>,
+    metrics: Arc<Metrics>,
+) -> Arc<DeduplicationEngine> {
+    match cfg {
+        Some(c) => Arc::new(
+            DeduplicationEngine::new_with_params(
+                rocksdb.clone(),
+                c.deduplication.hotset_size,
+                c.deduplication.bloom_capacity,
+                c.deduplication.lru_size,
+            )
+            .with_metrics(metrics),
+        ),
+        None => Arc::new(DeduplicationEngine::new(rocksdb).with_metrics(metrics)),
+    }
+}
+
+fn relay_settings(cfg: &Option<AppConfig>) -> (Duration, usize) {
+    match cfg {
+        Some(c) => (
+            Duration::from_secs(c.relay.health_check_interval),
+            c.relay.max_connections,
+        ),
+        None => (Duration::from_secs(30), 10_000),
+    }
+}
+
+fn resolve_allowed_kinds(cfg: &Option<AppConfig>) -> Option<Vec<u16>> {
+    cfg.as_ref()
+        .map(|c| c.filters.allowed_kinds.clone())
+        .filter(|kinds| !kinds.is_empty())
+}
+
+fn load_nostr_keys(cfg: &Option<AppConfig>) -> Result<Option<Keys>> {
+    if let Some(nostr) = cfg.as_ref().and_then(|c| c.nostr.as_ref()) {
+        let keys = Keys::parse(&nostr.secret_key).context("Failed to parse nostr secret key")?;
+        Ok(Some(keys))
+    } else {
+        Ok(None)
+    }
+}
+
+async fn init_nostr_publisher(
+    cfg: &Option<AppConfig>,
+    keys: Option<&Keys>,
+) -> Result<Option<Arc<Client>>> {
+    let keys = match keys {
+        Some(k) => k,
+        None => return Ok(None),
+    };
+
+    let client = Client::new(keys.clone());
+    let relays = match cfg {
+        Some(c) => c.relay.bootstrap_relays.clone(),
+        None => load_relay_urls().await?,
+    };
+
+    for url in relays {
+        client.add_relay(url).await.ok();
+    }
+    client.connect().await;
+    Ok(Some(Arc::new(client)))
+}
+
+async fn bootstrap_relays(cfg: &Option<AppConfig>) -> Result<Vec<String>> {
+    match cfg {
+        Some(c) => Ok(c.relay.bootstrap_relays.clone()),
+        None => load_relay_urls().await,
+    }
+}
+
+async fn init_subscription_service(
+    cfg: &Option<AppConfig>,
+) -> Result<Option<Arc<SubscriptionService>>> {
+    if let Some(pg) = cfg.as_ref().and_then(|c| c.postgres.as_ref()) {
+        let svc = SubscriptionService::new(&pg.dsn, pg.max_connections)
+            .await
+            .context("Failed to initialize subscription service")?;
+        Ok(Some(Arc::new(svc)))
+    } else {
+        Ok(None)
+    }
+}
+
+fn build_app(
+    cfg: &Option<AppConfig>,
+    rest_router: axum::Router,
+    downstream_rx: Receiver<Event>,
+    fanout_rx: Option<Receiver<FanoutMessage>>,
+    websocket_enabled: bool,
+    rocksdb: Arc<RocksDBStore>,
+) -> axum::Router {
+    if websocket_enabled {
+        let downstream_rx_arc = Arc::new(downstream_rx);
+        let fanout_rx_arc = fanout_rx.map(Arc::new);
+        let ws_router =
+            websocket::create_websocket_router(downstream_rx_arc.clone(), fanout_rx_arc);
+        axum::Router::new().merge(rest_router).merge(ws_router)
+    } else {
+        let downstream_tcp = cfg
+            .as_ref()
+            .map(|c| c.output.downstream_tcp.clone())
+            .unwrap_or_default();
+        let downstream_rest = cfg
+            .as_ref()
+            .map(|c| c.output.downstream_rest.clone())
+            .unwrap_or_default();
+
+        if !downstream_tcp.is_empty() || !downstream_rest.is_empty() {
+            let forwarder = DownstreamForwarder::new(
+                downstream_tcp.clone(),
+                downstream_rest.clone(),
+                rocksdb.clone(),
+            );
+            let downstream_rx_for_forwarder = downstream_rx;
+            tokio::spawn(async move {
+                if let Err(e) = forwarder.forward_events(downstream_rx_for_forwarder).await {
+                    error!("Downstream forwarder error: {}", e);
+                }
+            });
+            info!(
+                "Downstream forwarding enabled (TCP: {:?}, REST: {:?})",
+                downstream_tcp, downstream_rest
+            );
+        } else {
+            warn!(
+                "websocket_enabled is false but no downstream endpoints configured. Events will be dropped."
+            );
+        }
+
+        axum::Router::new().merge(rest_router)
+    }
+}
+
+fn spawn_memory_metrics(metrics: Arc<Metrics>) {
+    tokio::spawn(async move {
+        use sysinfo::{ProcessesToUpdate, System};
+        let mut sys = System::new();
+        loop {
+            sys.refresh_processes(ProcessesToUpdate::All, true);
+            if let Ok(pid) = sysinfo::get_current_pid() {
+                if let Some(process) = sys.process(pid) {
+                    metrics.memory_usage.set(process.memory() as f64 / 1024.0);
+                }
+            }
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        }
+    });
 }
