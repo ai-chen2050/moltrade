@@ -5,10 +5,13 @@ use axum::{
     response::Json,
     routing::{delete, get, post},
 };
+use chrono::{Datelike, Utc};
 use prometheus::{Encoder, TextEncoder};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 
 use crate::api::metrics::Metrics;
 use crate::core::dedupe_engine::DeduplicationEngine;
@@ -23,6 +26,38 @@ pub struct AppState {
     pub subscriptions: Option<Arc<SubscriptionService>>,
     pub platform_pubkey: Option<String>,
     pub settlement_token: Option<String>,
+    pub subscription_daily_limit: u64,
+    pub subscription_limiters: Arc<Mutex<HashMap<String, DailyLimit>>>,
+}
+
+#[derive(Debug)]
+pub struct DailyLimit {
+    limit: u64,
+    day: i32,
+    count: u64,
+}
+
+impl DailyLimit {
+    fn new(limit: u64) -> Self {
+        Self {
+            limit,
+            day: current_day_id(),
+            count: 0,
+        }
+    }
+
+    fn reset_if_needed(&mut self) {
+        let today = current_day_id();
+        if self.day != today {
+            self.day = today;
+            self.count = 0;
+        }
+    }
+}
+
+fn current_day_id() -> i32 {
+    let d = Utc::now().date_naive();
+    d.year() * 10_000 + d.month() as i32 * 100 + d.day() as i32
 }
 
 /// Create the REST API router
@@ -33,6 +68,7 @@ pub fn create_router(
     subscriptions: Option<Arc<SubscriptionService>>,
     platform_pubkey: Option<String>,
     settlement_token: Option<String>,
+    subscription_daily_limit: u64,
 ) -> Router {
     let state = AppState {
         pool,
@@ -41,6 +77,8 @@ pub fn create_router(
         subscriptions,
         platform_pubkey,
         settlement_token,
+        subscription_daily_limit,
+        subscription_limiters: Arc::new(Mutex::new(HashMap::new())),
     };
     Router::new()
         .route("/health", get(health))
@@ -126,8 +164,13 @@ struct RelayResponse {
 /// Add a new relay
 async fn add_relay(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(payload): Json<AddRelayRequest>,
 ) -> Result<Json<RelayResponse>, StatusCode> {
+    if !is_token_valid(&headers, state.settlement_token.as_deref()) {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
     match state.pool.connect_and_subscribe(payload.url.clone()).await {
         Ok(_) => Ok(Json(RelayResponse {
             success: true,
@@ -143,8 +186,13 @@ async fn add_relay(
 /// Remove a relay
 async fn remove_relay(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(payload): Json<RemoveRelayRequest>,
 ) -> Result<Json<RelayResponse>, StatusCode> {
+    if !is_token_valid(&headers, state.settlement_token.as_deref()) {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
     match state.pool.disconnect_relay(&payload.url).await {
         Ok(_) => Ok(Json(RelayResponse {
             success: true,
@@ -285,6 +333,17 @@ async fn add_subscription(
         None => return Err(StatusCode::SERVICE_UNAVAILABLE),
     };
 
+    let eth_addr = svc
+        .get_bot_eth_address(&payload.bot_pubkey)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to query bot eth address: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .ok_or(StatusCode::BAD_REQUEST)?;
+
+    enforce_subscription_limit(&state, &eth_addr).await?;
+
     svc.add_subscription(
         &payload.bot_pubkey,
         &payload.follower_pubkey,
@@ -406,6 +465,24 @@ fn is_token_valid(headers: &HeaderMap, expected: Option<&str>) -> bool {
             .map(|v| v == token)
             .unwrap_or(false),
     }
+}
+
+async fn enforce_subscription_limit(state: &AppState, eth_addr: &str) -> Result<(), StatusCode> {
+    if state.subscription_daily_limit == 0 {
+        return Ok(());
+    }
+
+    let mut guard = state.subscription_limiters.lock().await;
+    let entry = guard
+        .entry(eth_addr.to_string())
+        .or_insert_with(|| DailyLimit::new(state.subscription_daily_limit));
+
+    entry.reset_if_needed();
+    if entry.count >= entry.limit {
+        return Err(StatusCode::TOO_MANY_REQUESTS);
+    }
+    entry.count += 1;
+    Ok(())
 }
 
 /// List subscriptions for a bot

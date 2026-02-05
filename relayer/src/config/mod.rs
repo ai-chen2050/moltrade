@@ -124,6 +124,16 @@ fn default_credit_enable() -> bool {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct SubscriptionsConfig {
+    #[serde(default = "default_subscription_daily_limit")]
+    pub daily_limit: u64,
+}
+
+fn default_subscription_daily_limit() -> u64 {
+    1000
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct AppConfig {
     pub relay: RelayConfig,
     pub deduplication: DeduplicationConfig,
@@ -136,6 +146,8 @@ pub struct AppConfig {
     pub nostr: Option<NostrConfig>,
     #[serde(default)]
     pub settlement: Option<SettlementConfig>,
+    #[serde(default)]
+    pub subscriptions: Option<SubscriptionsConfig>,
     pub monitoring: MonitoringConfig,
 }
 

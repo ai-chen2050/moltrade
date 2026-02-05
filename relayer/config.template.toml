@@ -64,6 +64,11 @@ min_credit = 0.5
 profit_multiplier = 1.2
 enable = true
 
+# Subscription limits
+[subscriptions]
+# Daily POST limit for subscription endpoints (per bot eth_address). 0 disables limiting.
+daily_limit = 1000
+
 # Monitoring configuration
 [monitoring]
 prometheus_port = 9090

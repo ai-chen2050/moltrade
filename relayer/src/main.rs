@@ -103,7 +103,7 @@ async fn main() -> Result<()> {
 
     // Start settlement worker (Hyperliquid tx hash polling)
     if let Some(subs) = subscription_service.clone() {
-        let settlement_cfg = cfg.as_ref().and_then(|c| c.settlement.as_ref()).cloned();
+        let settlement_cfg = cfg.as_ref().and_then(|c| c.settlement.clone());
         let base_url = settlement_cfg
             .as_ref()
             .map(|s| s.explorer_base.clone())
@@ -170,6 +170,11 @@ async fn main() -> Result<()> {
     });
 
     // Create REST API router
+    let subscription_daily_limit = cfg
+        .as_ref()
+        .and_then(|c| c.subscriptions.as_ref())
+        .map(|s| s.daily_limit)
+        .unwrap_or(1000);
     let rest_router = rest_api::create_router(
         relay_pool.clone(),
         dedupe_engine.clone(),
@@ -179,6 +184,7 @@ async fn main() -> Result<()> {
         cfg.as_ref()
             .and_then(|c| c.settlement.as_ref())
             .and_then(|s| s.token.clone()),
+        subscription_daily_limit,
     );
 
     // Handle downstream forwarding based on config

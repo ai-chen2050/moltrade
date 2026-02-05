@@ -240,6 +240,19 @@ impl SubscriptionService {
         Ok(row.map(row_to_bot_record))
     }
 
+    pub async fn get_bot_eth_address(&self, bot_pubkey: &str) -> Result<Option<String>> {
+        let client = self.pool.get().await.context("Failed to get PG client")?;
+        let row = client
+            .query_opt(
+                "SELECT eth_address FROM bots WHERE bot_pubkey = $1",
+                &[&bot_pubkey],
+            )
+            .await
+            .context("Failed to query bot eth address")?;
+
+        Ok(row.map(|r| r.get(0)))
+    }
+
     pub async fn update_bot_last_seen(&self, bot_pubkey: &str) -> Result<()> {
         let client = self.pool.get().await.context("Failed to get PG client")?;
         client

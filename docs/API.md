@@ -45,6 +45,7 @@ Add relay:
 ```bash
 curl -X POST http://localhost:8080/api/relays/add \
   -H "Content-Type: application/json" \
+  -H "X-Settlement-Token: ${TOKEN}" \
   -d '{"url": "wss://relay.example.com"}'
 ```
 
@@ -53,6 +54,7 @@ Remove relay:
 ```bash
 curl -X DELETE http://localhost:8080/api/relays/remove \
   -H "Content-Type: application/json" \
+  -H "X-Settlement-Token: ${TOKEN}" \
   -d '{"url": "wss://relay.example.com"}'
 ```
 
@@ -81,6 +83,8 @@ List subscriptions for a bot:
 ```bash
 curl http://localhost:8080/api/subscriptions/<bot_pubkey>
 ```
+
+Notes: subscription POSTs are rate-limited per bot `eth_address` via `[subscriptions].daily_limit` (default 1000; set to 0 to disable). GET is unrestricted. Exceeding the limit returns HTTP 429.
 
 ### Trades
 
