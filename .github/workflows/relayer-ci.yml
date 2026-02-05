@@ -1,0 +1,42 @@
+name: Relayer CI
+
+on:
+  push:
+    paths:
+      - "relayer/**"
+      - ".github/workflows/relayer-ci.yml"
+  pull_request:
+    paths:
+      - "relayer/**"
+      - ".github/workflows/relayer-ci.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: relayer
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libssl-dev clang cmake \
+            liblz4-dev libsnappy-dev zlib1g-dev librocksdb-dev \
+            libzstd-dev libbz2-dev
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            relayer -> target
+
+      - name: Build
+        run: cargo build --locked --all-targets
