@@ -72,6 +72,7 @@ cache/
 # Trading Bot Specific
 config.json
 config.toml
+config.copy.json
 
 trade_history_*.json
 backtest_results*.json

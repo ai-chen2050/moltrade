@@ -1,5 +1,15 @@
 FROM rust:1.89.0 as builder
 WORKDIR /app
+RUN apt-get update \
+	&& apt-get install -y --no-install-recommends \
+		clang \
+		libclang-dev \
+		llvm-dev \
+		build-essential \
+		pkg-config \
+		cmake \
+		libssl-dev \
+	&& rm -rf /var/lib/apt/lists/*
 COPY . .
 RUN cargo build --release
 

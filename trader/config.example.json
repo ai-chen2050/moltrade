@@ -1,5 +1,5 @@
 {
-  "relayer_api": "http://localhost:8080",
+  "relayer_api": "http://84.46.253.204:8080",
   "wallet_address": "0x...",
   "private_key": "$PRIVATE_KEY",
   "telegram": {
