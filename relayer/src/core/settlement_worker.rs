@@ -6,8 +6,8 @@ use reqwest::StatusCode;
 use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
 
-use crate::core::subscription::SubscriptionService;
 use crate::config::SettlementCreditConfig;
+use crate::core::subscription::SubscriptionService;
 
 #[derive(Clone, Debug)]
 pub struct SettlementWorker {
@@ -47,10 +47,7 @@ impl SettlementWorker {
     }
 
     async fn tick(&self) -> Result<()> {
-        let trades = self
-            .svc
-            .list_pending_trades(self.batch_limit)
-            .await?;
+        let trades = self.svc.list_pending_trades(self.batch_limit).await?;
 
         if trades.is_empty() {
             debug!("settlement: no pending trades");
@@ -64,12 +61,8 @@ impl SettlementWorker {
                         .update_trade_settlement(&t.tx_hash, "confirmed", None, None)
                         .await?;
                     if let Some(credit) = self.compute_credit(&t) {
-                        let recipient = t
-                            .follower_pubkey
-                            .as_deref()
-                            .unwrap_or(&t.bot_pubkey);
-                        self
-                            .svc
+                        let recipient = t.follower_pubkey.as_deref().unwrap_or(&t.bot_pubkey);
+                        self.svc
                             .award_credits(&t.bot_pubkey, recipient, credit)
                             .await?;
                     }

@@ -3,7 +3,7 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use chacha20poly1305::aead::{Aead, KeyInit};
 use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use deadpool_postgres::{Config as PgConfig, Pool, Runtime};
 use nostr_sdk::prelude::{Client, EventBuilder, Keys};
 use nostr_sdk::{Event, Kind};
@@ -47,6 +47,27 @@ pub struct CreditBalance {
     pub bot_pubkey: String,
     pub follower_pubkey: String,
     pub credits: f64,
+}
+
+#[derive(Debug, Clone)]
+pub struct SignalInsert {
+    pub event_id: String,
+    pub kind: u16,
+    pub bot_pubkey: Option<String>,
+    pub leader_pubkey: String,
+    pub follower_pubkey: Option<String>,
+    pub agent_eth_address: Option<String>,
+    pub role: Option<String>,
+    pub symbol: Option<String>,
+    pub side: Option<String>,
+    pub size: Option<f64>,
+    pub price: Option<f64>,
+    pub status: Option<String>,
+    pub tx_hash: Option<String>,
+    pub pnl: Option<f64>,
+    pub pnl_usd: Option<f64>,
+    pub raw_content: String,
+    pub event_created_at: DateTime<Utc>,
 }
 
 /// Message ready for fanout to followers over WebSocket
@@ -139,6 +160,27 @@ impl SubscriptionService {
                     credits NUMERIC NOT NULL DEFAULT 0,
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                     PRIMARY KEY (bot_pubkey, follower_pubkey)
+                );
+                CREATE TABLE IF NOT EXISTS signals (
+                    id BIGSERIAL PRIMARY KEY,
+                    event_id TEXT NOT NULL UNIQUE,
+                    kind INTEGER NOT NULL,
+                    bot_pubkey TEXT NULL REFERENCES bots(bot_pubkey) ON DELETE SET NULL,
+                    leader_pubkey TEXT NOT NULL,
+                    follower_pubkey TEXT NULL,
+                    agent_eth_address TEXT NULL,
+                    role TEXT NULL,
+                    symbol TEXT NULL,
+                    side TEXT NULL,
+                    size DOUBLE PRECISION NULL,
+                    price DOUBLE PRECISION NULL,
+                    status TEXT NULL,
+                    tx_hash TEXT NULL,
+                    pnl DOUBLE PRECISION NULL,
+                    pnl_usd DOUBLE PRECISION NULL,
+                    raw_content TEXT NOT NULL,
+                    event_created_at TIMESTAMPTZ NOT NULL,
+                    inserted_at TIMESTAMPTZ NOT NULL DEFAULT now()
                 );",
             )
             .await
@@ -480,6 +522,59 @@ impl SubscriptionService {
             )
             .await
             .context("Failed to award credits")?;
+        Ok(())
+    }
+
+    pub async fn record_signal(&self, signal: SignalInsert) -> Result<()> {
+        let client = self.pool.get().await.context("Failed to get PG client")?;
+
+        client
+            .execute(
+                "INSERT INTO signals (
+                    event_id,
+                    kind,
+                    bot_pubkey,
+                    leader_pubkey,
+                    follower_pubkey,
+                    agent_eth_address,
+                    role,
+                    symbol,
+                    side,
+                    size,
+                    price,
+                    status,
+                    tx_hash,
+                    pnl,
+                    pnl_usd,
+                    raw_content,
+                    event_created_at
+                ) VALUES (
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
+                )
+                ON CONFLICT (event_id) DO NOTHING",
+                &[
+                    &signal.event_id,
+                    &(signal.kind as i32),
+                    &signal.bot_pubkey,
+                    &signal.leader_pubkey,
+                    &signal.follower_pubkey,
+                    &signal.agent_eth_address,
+                    &signal.role,
+                    &signal.symbol,
+                    &signal.side,
+                    &signal.size,
+                    &signal.price,
+                    &signal.status,
+                    &signal.tx_hash,
+                    &signal.pnl,
+                    &signal.pnl_usd,
+                    &signal.raw_content,
+                    &signal.event_created_at,
+                ],
+            )
+            .await
+            .context("Failed to record signal event")?;
+
         Ok(())
     }
 }

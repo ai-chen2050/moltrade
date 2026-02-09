@@ -6,10 +6,7 @@ use tracing_subscriber::EnvFilter;
 
 async fn handle_event(Json(payload): Json<Value>) -> impl IntoResponse {
     info!("=== Received Nostr Event ===");
-    info!(
-        "{}",
-        serde_json::to_string_pretty(&payload).unwrap()
-    );
+    info!("{}", serde_json::to_string_pretty(&payload).unwrap());
     info!("============================");
 
     (StatusCode::OK, "Event received successfully")

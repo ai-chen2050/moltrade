@@ -9,7 +9,8 @@ use tracing::{debug, error, info};
 
 use crate::api::metrics::Metrics;
 use crate::core::dedupe_engine::DeduplicationEngine;
-use crate::core::subscription::{FanoutMessage, SubscriptionService};
+use crate::core::subscription::{FanoutMessage, SignalInsert, SubscriptionService};
+use chrono::{DateTime, TimeZone, Utc};
 use nostr_sdk::Kind;
 use nostr_sdk::nips::nip04;
 use nostr_sdk::prelude::{Client, EventBuilder, Keys, PublicKey, Tag, Timestamp};
@@ -347,6 +348,12 @@ impl EventRouter {
             }
         };
 
+        if event.kind.as_u16() == KIND_TRADE_SIGNAL {
+            return self
+                .process_trade_signal(event, &plaintext, subs, nostr_keys)
+                .await;
+        }
+
         let preview = if plaintext.len() > 256 {
             format!("{}...", &plaintext[..256])
         } else {
@@ -437,6 +444,123 @@ impl EventRouter {
 }
 
 impl EventRouter {
+    async fn process_trade_signal(
+        &self,
+        event: &Event,
+        plaintext: &str,
+        subs: &SubscriptionService,
+        nostr_keys: &Keys,
+    ) -> Result<()> {
+        let meta = extract_signal_meta(plaintext);
+        let agent_eth = meta.agent_eth_address.clone();
+        let event_created_at = to_event_datetime(event);
+        let leader_pubkey = event.pubkey.to_hex();
+
+        let bot = match agent_eth.as_deref() {
+            Some(eth) => match subs.find_bot_by_eth(eth).await? {
+                Some(b) => Some(b),
+                None => {
+                    error!("No bot registered for eth address {}", eth);
+                    None
+                }
+            },
+            None => {
+                error!(
+                    "agent eth address missing in trade signal {}",
+                    event.id.to_hex()
+                );
+                None
+            }
+        };
+
+        let signal_insert = SignalInsert {
+            event_id: event.id.to_hex(),
+            kind: event.kind.as_u16(),
+            bot_pubkey: bot.as_ref().map(|b| b.bot_pubkey.clone()),
+            leader_pubkey: leader_pubkey.clone(),
+            follower_pubkey: meta.follower_pubkey.clone(),
+            agent_eth_address: agent_eth.clone(),
+            role: meta.role.clone(),
+            symbol: meta.symbol.clone(),
+            side: meta.side.clone(),
+            size: meta.size,
+            price: meta.price,
+            status: meta.status.clone(),
+            tx_hash: meta.tx_hash.clone(),
+            pnl: meta.pnl,
+            pnl_usd: meta.pnl_usd,
+            raw_content: plaintext.to_string(),
+            event_created_at,
+        };
+
+        if let Err(e) = subs.record_signal(signal_insert).await {
+            error!("Failed to record trade signal {}: {}", event.id.to_hex(), e);
+        }
+
+        let bot = match bot {
+            Some(b) => b,
+            None => return Ok(()),
+        };
+
+        self.maybe_record_trade(subs, &bot.bot_pubkey, plaintext)
+            .await;
+        let followers = subs.list_subscriptions(&bot.bot_pubkey).await?;
+        if followers.is_empty() {
+            return Ok(());
+        }
+
+        if let Some(fanout_tx) = &self.fanout_tx {
+            for follower in &followers {
+                let msg = FanoutMessage {
+                    target_pubkey: follower.follower_pubkey.clone(),
+                    bot_pubkey: bot.bot_pubkey.clone(),
+                    kind: event.kind.as_u16(),
+                    original_event_id: event.id.to_hex(),
+                    payload: plaintext.to_string(),
+                };
+                if let Err(e) = fanout_tx.send_async(msg).await {
+                    error!("Failed to send fanout ws payload: {}", e);
+                }
+            }
+        }
+
+        if let Some(client) = &self.nostr_client {
+            for follower in followers {
+                let follower_pk_str = follower.shared_secret.as_str();
+                let follower_pk = match PublicKey::from_str(follower_pk_str) {
+                    Ok(pk) => pk,
+                    Err(e) => {
+                        error!(
+                            "Invalid follower shared_secret pubkey {}: {}",
+                            follower_pk_str, e
+                        );
+                        continue;
+                    }
+                };
+
+                let encrypted =
+                    match nip04::encrypt(nostr_keys.secret_key(), &follower_pk, plaintext) {
+                        Ok(ct) => ct,
+                        Err(e) => {
+                            error!("Encrypt for follower {} failed: {}", follower_pk_str, e);
+                            continue;
+                        }
+                    };
+
+                let mut builder = EventBuilder::new(Kind::Custom(event.kind.as_u16()), encrypted);
+                builder = builder.tag(Tag::public_key(follower_pk));
+
+                if let Err(e) = client.send_event_builder(builder).await {
+                    error!("Publish to follower {} failed: {}", follower_pk_str, e);
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl EventRouter {
     fn is_stale(&self, event: &Event) -> bool {
         let now = Timestamp::now().as_secs();
         let created = event.created_at.as_secs();
@@ -483,17 +607,6 @@ impl EventRouter {
     }
 }
 
-fn extract_agent_eth(plaintext: &str) -> Option<String> {
-    let parsed: serde_json::Value = serde_json::from_str(plaintext).ok()?;
-    parsed
-        .get("agent_eth_address")
-        .or_else(|| parsed.get("agent"))
-        .or_else(|| parsed.get("account"))
-        .or_else(|| parsed.get("eth_address"))
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-}
-
 #[derive(Debug)]
 struct TradeMeta {
     tx_hash: String,
@@ -506,6 +619,21 @@ struct TradeMeta {
     pnl_usd: Option<f64>,
     follower_pubkey: Option<String>,
     role: String,
+}
+
+#[derive(Debug, Default)]
+struct SignalMeta {
+    agent_eth_address: Option<String>,
+    follower_pubkey: Option<String>,
+    role: Option<String>,
+    symbol: Option<String>,
+    side: Option<String>,
+    size: Option<f64>,
+    price: Option<f64>,
+    status: Option<String>,
+    tx_hash: Option<String>,
+    pnl: Option<f64>,
+    pnl_usd: Option<f64>,
 }
 
 impl EventRouter {
@@ -589,4 +717,73 @@ fn extract_trade_meta(plaintext: &str) -> Option<TradeMeta> {
         follower_pubkey,
         role,
     })
+}
+
+fn extract_signal_meta(plaintext: &str) -> SignalMeta {
+    let parsed: Value = match serde_json::from_str(plaintext) {
+        Ok(v) => v,
+        Err(_) => return SignalMeta::default(),
+    };
+
+    let agent_eth_address = parsed
+        .get("agent_eth_address")
+        .or_else(|| parsed.get("agent"))
+        .or_else(|| parsed.get("account"))
+        .or_else(|| parsed.get("eth_address"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    let follower_pubkey = parsed
+        .get("follower_pubkey")
+        .or_else(|| parsed.get("follower"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    let role = parsed
+        .get("role")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let symbol = parsed
+        .get("symbol")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let side = parsed
+        .get("side")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let size = parsed.get("size").and_then(|v| v.as_f64());
+    let price = parsed.get("price").and_then(|v| v.as_f64());
+    let status = parsed
+        .get("status")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let tx_hash = parsed
+        .get("tx_hash")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let pnl = parsed.get("pnl").and_then(|v| v.as_f64());
+    let pnl_usd = parsed.get("pnl_usd").and_then(|v| v.as_f64());
+
+    SignalMeta {
+        agent_eth_address,
+        follower_pubkey,
+        role,
+        symbol,
+        side,
+        size,
+        price,
+        status,
+        tx_hash,
+        pnl,
+        pnl_usd,
+    }
+}
+
+fn extract_agent_eth(plaintext: &str) -> Option<String> {
+    extract_signal_meta(plaintext).agent_eth_address
+}
+
+fn to_event_datetime(event: &Event) -> DateTime<Utc> {
+    let secs = event.created_at.as_secs() as i64;
+    Utc.timestamp_opt(secs, 0).single().unwrap_or_else(Utc::now)
 }

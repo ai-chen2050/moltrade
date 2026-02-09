@@ -1,4 +1,6 @@
-use prometheus::{register_gauge, register_histogram, register_int_counter, Gauge, Histogram, IntCounter};
+use prometheus::{
+    Gauge, Histogram, IntCounter, register_gauge, register_histogram, register_int_counter,
+};
 
 /// Metrics for monitoring the relay system
 pub struct Metrics {
@@ -26,10 +28,7 @@ impl Metrics {
                 "processing_latency_seconds",
                 "Event processing latency in seconds"
             )?,
-            memory_usage: register_gauge!(
-                "memory_usage_mb",
-                "Memory usage in Million Bytes"
-            )?,
+            memory_usage: register_gauge!("memory_usage_mb", "Memory usage in Million Bytes")?,
             active_connections: register_gauge!(
                 "active_connections",
                 "Number of active relay connections"

@@ -26,10 +26,7 @@ pub struct WsState {
 // use crate::core::relay_pool::RelayPool;
 
 /// WebSocket handler for streaming events to downstream systems
-async fn websocket_handler(
-    ws: WebSocketUpgrade,
-    State(state): State<WsState>,
-) -> Response {
+async fn websocket_handler(ws: WebSocketUpgrade, State(state): State<WsState>) -> Response {
     let rx = state.event_rx.clone();
     ws.on_upgrade(|socket| handle_socket(socket, rx))
 }
