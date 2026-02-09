@@ -138,6 +138,7 @@ async fn status(State(state): State<AppState>) -> Json<serde_json::Value> {
                 "status": format!("{:?}", status)
             })
         }).collect::<Vec<_>>(),
+        "relayer_nostr_pubkey": state.platform_pubkey,
         "deduplication_engine": {
             "bloom_filter_size": deque_status.bloom_filter_size,
             "lru_cache_size": deque_status.lru_cache_size,

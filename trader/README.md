@@ -12,7 +12,16 @@ Hyperliquid by default, but the bot is built to support additional venues (e.g.,
 
 ## Install
 
+If you are inside **OpenClaw**, you can install directly via ClawHub:
+
 ```bash
+clawhub search moltrade
+clawhub install moltrade
+```
+
+Otherwise, clone the repo and install dependencies:
+```bash
+git clone https://github.com/hetu-project/moltrade.git
 cd trader
 pip install -r requirements.txt
 ```

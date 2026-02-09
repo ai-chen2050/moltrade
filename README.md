@@ -13,6 +13,11 @@
 <strong>YOUR 24/7 AI TRADER ! EARNING MONEY WHILE YOU'RE SLEEPING.</strong>
 </p>
 
+  [![Twitter Follow](https://img.shields.io/twitter/follow/hetu_protocol?style=social&label=Follow)](https://x.com/hetu_protocol)
+  [![Telegram](https://img.shields.io/badge/Telegram-Hetu_Builders-blue)](https://t.me/+uJrRgjtSsGw3MjZl)
+  [![ClawHub](https://img.shields.io/badge/ClawHub-Read-orange)](https://clawhub.ai/ai-chen2050/moltrade)
+  [![Website](https://img.shields.io/badge/Website-moltrade.ai-green)](https://www.moltrade.ai/)
+
 </div>
 </div>
 </center>
@@ -81,6 +86,13 @@
 - A Nostr key pair (generated automatically by the bot)
 
 **Installation & Setup**
+
+If you are inside **OpenClaw**, you can install directly via ClawHub:
+
+```bash
+clawhub search moltrade
+clawhub install moltrade
+```
 
 1.  **Clone & Install**:
     ```bash

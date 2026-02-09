@@ -1,6 +1,6 @@
 ---
 name: moltrade
-description: Operate the Moltrade trading bot (config, backtest, test-mode runs, Nostr signal broadcast, exchange adapters, strategy integration) in OpenClaw.
+description: **Moltrade** is a decentralized, automated trading assistant that lets you run quant strategies, share encrypted signals, and allow others to copy your trades—all securely via the Nostr network. Earn reputation and credits based on your trading performance.
 metadata:
   openclaw:
     emoji: "🤖"
@@ -11,11 +11,70 @@ metadata:
 
 # Moltrade Bot Skill
 
-Paths are repo-root relative. Keep actions deterministic and redact secrets.
+Operate the Moltrade trading bot (config, backtest, test-mode runs, Nostr signal broadcast, exchange adapters, strategy integration) in OpenClaw.
+
+<center>
+
+<div align="center">
+    <picture>
+        <source media="(prefers-color-scheme: light)" srcset="../../assets/moltrade-black.png">
+        <img src="../../assets/moltrade-white.png" alt="Moltrade" width="600">
+    </picture>
+
+<div style="text-align: center; font-weight: bold;">
+<p align="center">
+<strong>YOUR 24/7 AI TRADER ! EARNING MONEY WHILE YOU'RE SLEEPING.</strong>
+</p>
+
+[![Twitter Follow](https://img.shields.io/twitter/follow/hetu_protocol?style=social&label=Follow)](https://x.com/hetu_protocol)
+[![Telegram](https://img.shields.io/badge/Telegram-Hetu_Builders-blue)](https://t.me/+uJrRgjtSsGw3MjZl)
+[![ClawHub](https://img.shields.io/badge/ClawHub-Read-orange)](https://clawhub.ai/ai-chen2050/moltrade)
+[![Website](https://img.shields.io/badge/Website-moltrade.ai-green)](https://www.moltrade.ai/)
+
+</div>
+</div>
+</center>
+
+---
+
+## Core Features
+
+**Moltrade** balances security, usability, and scalability. Key advantages include:
+
+- **Client-side Key self-hosting,not cloud Custody,**: All sensitive keys and credentials remain on the user's machine; the cloud relay never holds funds or private keys, minimizing custodial risk.**No access to private keys or funds.**
+- **Encrypted, Targeted Communication**: Signals are encrypted before publishing and only decryptable by intended subscribers, preserving strategy privacy and subscriber security.
+- **Lightweight Cloud Re-encryption & Broadcast**: The cloud acts as an efficient relay/re-broadcaster without storing private keys; re-encryption or forwarding techniques improve delivery reliability and reach.
+- **One-Click Copy Trading (User Friendly)**: Provides an out-of-the-box copy-trading experience for non-expert users—set up in a few steps and execute signals locally.
+- **OpenClaw Strategy Advisor**: Integrates OpenClaw as an advisory tool for automated backtests and improvement suggestions; users decide whether to adopt recommended changes.
+- **Cloud Can Be Decentralized Relayer Network**: The lightweight relay architecture allows future migration to decentralized relay networks, reducing single points of failure and improving censorship resistance.
+- **Unified Incentive (Credit) System**: A transparent, verifiable Credit mechanism rewards all participants (signal providers, followers, relay nodes), aligning incentives across the ecosystem.
+
+## **How It Works (Simplified Flow)**
+
+```mermaid
+graph LR
+    A["1) Run Your Bot"]
+    B["2) Generate & Encrypt"]
+    C["3) Relay"]
+    D["4) Copy & Execute"]
+    E["5) Verify & Earn"]
+
+    A ---> B
+    B ---> C
+    C ---> D
+    D ---> E
+```
 
 ## Install & Init
 
-- Clone the repo and install Python deps locally (code is required for strategies, nostr, and CLI):
+- If you are inside **OpenClaw**, you can install directly via ClawHub:
+
+```bash
+clawhub search moltrade
+clawhub install moltrade
+```
+
+- OR & Clone the repo and install Python deps locally (code is required for strategies, nostr, and CLI):
   - `git clone https://github.com/hetu-project/moltrade.git`
   - `cd moltrade/trader && pip install -r requirements.txt`
 - Initialize a fresh config with the built-in wizard (no trading):
@@ -67,3 +126,7 @@ Paths are repo-root relative. Keep actions deterministic and redact secrets.
 
 - Never print or commit private keys, mnemonics, nsec, or shared keys.
 - Default to test mode; require explicit consent for live trading.
+
+## Disclaimer
+
+Trading cryptocurrencies and derivatives carries significant risk. Moltrade is a tool for automation and social trading. You are solely responsible for any financial losses. Past performance is not indicative of future results.

@@ -255,8 +255,8 @@ impl EventRouter {
     }
 
     async fn handle_copytrade_fanout(&self, event: &Event) -> Result<()> {
-        // Short-circuit heartbeat-like events: no decrypt/fanout required
-        if matches!(event.kind.as_u16(), KIND_HEARTBEAT | KIND_EXECUTION_REPORT) {
+        // Short-circuit only heartbeats: execution reports must be processed for DB writes
+        if event.kind.as_u16() == KIND_HEARTBEAT {
             return Ok(());
         }
 
