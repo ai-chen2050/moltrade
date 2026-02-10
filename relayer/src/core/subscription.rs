@@ -166,6 +166,8 @@ impl SubscriptionService {
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                     PRIMARY KEY (bot_pubkey, follower_pubkey)
                 );
+                ALTER TABLE credits ALTER COLUMN credits TYPE DOUBLE PRECISION USING credits::double precision;
+                ALTER TABLE credits ALTER COLUMN credits SET DEFAULT 0.0;
                 CREATE TABLE IF NOT EXISTS signals (
                     id BIGSERIAL PRIMARY KEY,
                     event_id TEXT NOT NULL UNIQUE,
@@ -528,10 +530,10 @@ impl SubscriptionService {
         let client = self.pool.get().await.context("Failed to get PG client")?;
         client
             .execute(
-                "INSERT INTO credits (bot_pubkey, follower_pubkey, credits)
+                "INSERT INTO credits AS c (bot_pubkey, follower_pubkey, credits)
                  VALUES ($1, $2, $3)
                  ON CONFLICT (bot_pubkey, follower_pubkey)
-                 DO UPDATE SET credits = credits + EXCLUDED.credits, updated_at = now()",
+                 DO UPDATE SET credits = c.credits + EXCLUDED.credits, updated_at = now()",
                 &[&bot_pubkey, &follower_pubkey, &delta],
             )
             .await

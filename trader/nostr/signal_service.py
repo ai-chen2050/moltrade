@@ -42,7 +42,7 @@ class SignalBroadcaster:
         self.sid = nostr_cfg.get("sid", "bot-main")
         self.role = nostr_cfg.get("role", "bot")
         self.relays = nostr_cfg.get("relays", [])
-        self.relayer_api = nostr_cfg.get("relayer_api")
+        self.relayer_api = config.get("relayer_api")
         self.settlement_token = nostr_cfg.get("settlement_token")
 
         if not self.enabled:
@@ -220,6 +220,7 @@ class SignalBroadcaster:
         account: Optional[str] = None,
         note: Optional[str] = None,
         oid: Optional[str] = None,
+        follower_pubkey: Optional[str] = None,
     ) -> bool:
         if not self.enabled:
             return False
@@ -251,14 +252,17 @@ class SignalBroadcaster:
         )
         published = self._publish(event)
 
-        if tx_hash and self.relayer_api and self.publisher is not None:
+        if self.relayer_api and self.publisher is not None:
             self._report_trade_tx(
+                account=account,
                 tx_hash=tx_hash,
                 symbol=symbol,
                 side=side,
                 size=size,
                 price=price,
                 role=self.role,
+                follower_pubkey=follower_pubkey,
+                oid=oid,
             )
 
         return published
@@ -287,28 +291,35 @@ class SignalBroadcaster:
     def _report_trade_tx(
         self,
         *,
-        tx_hash: str,
+        account: Optional[str],
+        tx_hash: Optional[str],
         symbol: str,
         side: str,
         size: float,
         price: float,
         role: str,
         follower_pubkey: Optional[str] = None,
+        oid: Optional[str] = None,
     ) -> None:
+        if not account:
+            logger.warning("Failed to report trade tx: missing account/wallet for bot_pubkey")
+            return
+        db_role = "leader" if role.lower() in ("bot", "leader") else "follower"
         url = f"{self.relayer_api.rstrip('/')}/api/trades/record"
         headers = {"Content-Type": "application/json"}
         if self.settlement_token:
             headers["X-Settlement-Token"] = self.settlement_token
 
         payload = {
-            "bot_pubkey": getattr(self.publisher, "public_key", None),
+            "bot_pubkey": account,
             "follower_pubkey": follower_pubkey,
-            "role": role,
+            "role": db_role,
             "symbol": symbol,
             "side": side,
             "size": size,
             "price": price,
             "tx_hash": tx_hash,
+            "oid": oid,
         }
 
         try:

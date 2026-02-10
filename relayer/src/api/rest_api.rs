@@ -392,10 +392,16 @@ async fn record_trade(
         return Err(StatusCode::BAD_REQUEST);
     }
 
+    let role = if payload.role.eq_ignore_ascii_case("follower") {
+        "follower"
+    } else {
+        "leader"
+    };
+
     svc.record_trade_tx(
         &payload.bot_pubkey,
         payload.follower_pubkey.as_deref(),
-        &payload.role,
+        role,
         &payload.symbol,
         &payload.side,
         payload.size,

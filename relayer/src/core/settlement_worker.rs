@@ -60,33 +60,67 @@ impl SettlementWorker {
             match self.verify_tx_opt(t.tx_hash.as_deref()).await {
                 Ok(Some(true)) => {
                     self.svc
-                        .update_trade_settlement(t.tx_hash.as_deref(), t.oid.as_deref(), "confirmed", None, None)
+                        .update_trade_settlement(
+                            t.tx_hash.as_deref(),
+                            t.oid.as_deref(),
+                            "confirmed",
+                            None,
+                            None,
+                        )
                         .await?;
                     if let Some(credit) = self.compute_credit(&t) {
                         let recipient = t.follower_pubkey.as_deref().unwrap_or(&t.bot_pubkey);
-                        self.svc
+                        if let Err(e) = self
+                            .svc
                             .award_credits(&t.bot_pubkey, recipient, credit)
-                            .await?;
+                            .await
+                        {
+                            log_award_error(&e, &t.bot_pubkey, recipient);
+                            continue;
+                        }
                     }
-                    info!("settlement: confirmed tx_hash={:?} oid={:?}", t.tx_hash, t.oid);
+                    info!(
+                        "settlement: confirmed tx_hash={:?} oid={:?}",
+                        t.tx_hash, t.oid
+                    );
                 }
                 Ok(Some(false)) => {
                     self.svc
-                        .update_trade_settlement(t.tx_hash.as_deref(), t.oid.as_deref(), "failed", None, None)
+                        .update_trade_settlement(
+                            t.tx_hash.as_deref(),
+                            t.oid.as_deref(),
+                            "failed",
+                            None,
+                            None,
+                        )
                         .await?;
-                    warn!("settlement: marked failed tx_hash={:?} oid={:?}", t.tx_hash, t.oid);
+                    warn!(
+                        "settlement: marked failed tx_hash={:?} oid={:?}",
+                        t.tx_hash, t.oid
+                    );
                 }
                 Ok(None) => {
                     // If no tx hash, treat pending entry as immediately credit-eligible.
                     if t.tx_hash.is_none() {
                         if let Some(credit) = self.compute_credit(&t) {
                             let recipient = t.follower_pubkey.as_deref().unwrap_or(&t.bot_pubkey);
-                            self.svc
+                            if let Err(e) = self
+                                .svc
                                 .award_credits(&t.bot_pubkey, recipient, credit)
-                                .await?;
+                                .await
+                            {
+                                log_award_error(&e, &t.bot_pubkey, recipient);
+                                continue;
+                            }
                         }
                         self.svc
-                            .update_trade_settlement(t.tx_hash.as_deref(), t.oid.as_deref(), "confirmed", None, None)
+                            .update_trade_settlement(
+                                t.tx_hash.as_deref(),
+                                t.oid.as_deref(),
+                                "confirmed",
+                                None,
+                                None,
+                            )
                             .await?;
                         info!("settlement: credited pending trade with oid={:?}", t.oid);
                     } else {
@@ -94,7 +128,10 @@ impl SettlementWorker {
                     }
                 }
                 Err(e) => {
-                    error!("settlement: verify tx_hash={:?} oid={:?} error: {}", t.tx_hash, t.oid, e);
+                    error!(
+                        "settlement: verify tx_hash={:?} oid={:?} error: {}",
+                        t.tx_hash, t.oid, e
+                    );
                 }
             }
         }
@@ -147,4 +184,21 @@ impl SettlementWorker {
             None
         }
     }
+}
+
+fn log_award_error(err: &anyhow::Error, bot_pubkey: &str, follower: &str) {
+    if let Some(db_err) = err.downcast_ref::<tokio_postgres::Error>() {
+        if let Some(code) = db_err.code() {
+            warn!(
+                "award_credits failed (pg code={:?}): bot={} follower={} err={:?}",
+                code, bot_pubkey, follower, db_err
+            );
+            return;
+        }
+    }
+
+    warn!(
+        "award_credits failed: bot={} follower={} err={:?}",
+        bot_pubkey, follower, err
+    );
 }
