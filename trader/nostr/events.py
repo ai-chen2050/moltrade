@@ -81,6 +81,7 @@ class CopyTradeIntentPayload:
 class ExecutionReportPayload:
     symbol: str
     side: str
+    strategy: Optional[str]
     size: float
     price: float
     status: str

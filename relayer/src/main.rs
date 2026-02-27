@@ -21,6 +21,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use storage::rocksdb_store::RocksDBStore;
 use tokio::signal;
+use tower_http::cors::CorsLayer;
 use tracing::{error, info, warn};
 use tracing_subscriber;
 
@@ -430,7 +431,10 @@ fn build_app(
     fanout_rx: Option<Receiver<FanoutMessage>>,
     websocket_enabled: bool,
 ) -> axum::Router {
-    if websocket_enabled {
+    // Allow frontend (e.g. http://localhost:3000) to call API
+    let cors = CorsLayer::permissive();
+
+    let app = if websocket_enabled {
         let downstream_rx_arc = Arc::new(downstream_rx);
         let fanout_rx_arc = fanout_rx.map(Arc::new);
         let ws_router =
@@ -453,7 +457,9 @@ fn build_app(
         }
 
         axum::Router::new().merge(rest_router)
-    }
+    };
+
+    app.layer(cors)
 }
 
 fn spawn_memory_metrics(metrics: Arc<Metrics>) {

@@ -2,7 +2,7 @@ use axum::{
     Router,
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
-    response::Json,
+    response::{IntoResponse, Json},
     routing::{delete, get, post},
 };
 use chrono::{Datelike, Utc};
@@ -17,7 +17,13 @@ use tokio_postgres::error::SqlState;
 use crate::api::metrics::Metrics;
 use crate::core::dedupe_engine::DeduplicationEngine;
 use crate::core::relay_pool::RelayPool;
-use crate::core::subscription::SubscriptionService;
+use crate::core::subscription::{
+    DashboardSummary, LeaderDetail, LeaderboardItem, SortOrder, StrategyCategory, StrategyDetail,
+    StrategyPerformanceInterval, StrategyPerformanceMetric, StrategyPerformanceSeries,
+    StrategyRankBy, StrategyTrendingItem, SubscriptionService,
+};
+
+const SKILL_MD_CONTENT: &str = include_str!("../../../skills/moltrade/SKILL.md");
 
 #[derive(Clone)]
 pub struct AppState {
@@ -83,6 +89,7 @@ pub fn create_router(
     };
     Router::new()
         .route("/health", get(health))
+        .route("/skill.md", get(skill_markdown))
         .route("/metrics", get(prometheus_metrics))
         .route("/status", get(status))
         .route("/api/metrics/summary", get(metrics_summary))
@@ -100,6 +107,15 @@ pub fn create_router(
         .route("/api/trades/record", post(record_trade))
         .route("/api/trades/settlement", post(update_trade_settlement))
         .route("/api/credits", get(list_credits))
+        .route("/api/dashboard/summary", get(dashboard_summary))
+        .route("/api/strategies/trending", get(strategies_trending))
+        .route("/api/strategies/{strategy}/detail", get(strategy_detail))
+        .route(
+            "/api/strategies/{strategy}/performance",
+            get(strategy_performance),
+        )
+        .route("/api/leaderboard", get(leaderboard))
+        .route("/api/agents/{id}", get(agent_detail))
         .with_state(state)
 }
 
@@ -109,6 +125,14 @@ async fn health() -> Json<serde_json::Value> {
         "status": "healthy",
         "service": "moltrade-relayer"
     }))
+}
+
+/// Public markdown page for Moltrade skill.
+async fn skill_markdown() -> impl IntoResponse {
+    (
+        [("content-type", "text/markdown; charset=utf-8")],
+        SKILL_MD_CONTENT,
+    )
 }
 
 /// Metrics endpoint for Prometheus
@@ -251,6 +275,7 @@ struct RecordTradeRequest {
     follower_pubkey: Option<String>,
     role: String,
     symbol: String,
+    strategy: Option<String>,
     side: String,
     size: f64,
     price: f64,
@@ -271,6 +296,72 @@ struct UpdateSettlementRequest {
 struct CreditsQuery {
     bot_pubkey: Option<String>,
     follower_pubkey: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LeaderboardQuery {
+    #[serde(default = "default_leaderboard_period")]
+    period_days: i64,
+    #[serde(default = "default_leaderboard_limit")]
+    limit: i64,
+    #[serde(default)]
+    offset: i64,
+}
+
+#[derive(Debug, Deserialize)]
+struct StrategiesTrendingQuery {
+    period: Option<String>,
+    period_days: Option<i64>,
+    category: Option<String>,
+    #[serde(default = "default_leaderboard_limit")]
+    limit: i64,
+    #[serde(default)]
+    offset: i64,
+    rank_by: Option<String>,
+    order: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StrategyDetailQuery {
+    period: Option<String>,
+    period_days: Option<i64>,
+    #[serde(default = "default_trades_limit")]
+    activity_limit: i64,
+}
+
+#[derive(Debug, Deserialize)]
+struct StrategyPerformanceQuery {
+    period: Option<String>,
+    period_days: Option<i64>,
+    metric: Option<String>,
+    interval: Option<String>,
+}
+
+fn default_leaderboard_period() -> i64 {
+    30
+}
+fn default_leaderboard_limit() -> i64 {
+    50
+}
+
+#[derive(Debug, Serialize)]
+struct LeaderboardResponse {
+    data: Vec<LeaderboardItem>,
+}
+
+#[derive(Debug, Serialize)]
+struct StrategyTrendingResponse {
+    data: Vec<StrategyTrendingItem>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AgentDetailQuery {
+    #[serde(default = "default_trades_limit")]
+    trades_limit: i64,
+}
+
+fn default_trades_limit() -> i64 {
+    50
 }
 
 #[derive(Debug, Serialize)]
@@ -403,6 +494,7 @@ async fn record_trade(
         payload.follower_pubkey.as_deref(),
         role,
         &payload.symbol,
+        payload.strategy.as_deref(),
         &payload.side,
         payload.size,
         payload.price,
@@ -499,6 +591,252 @@ async fn list_credits(
             })
             .collect(),
     }))
+}
+
+/// Dashboard summary metrics for frontend cards
+async fn dashboard_summary(
+    State(state): State<AppState>,
+) -> Result<Json<DashboardSummary>, StatusCode> {
+    let svc = match &state.subscriptions {
+        Some(s) => s,
+        None => return Err(StatusCode::SERVICE_UNAVAILABLE),
+    };
+
+    let summary = svc.get_dashboard_summary().await.map_err(|e| {
+        tracing::error!("Failed to load dashboard summary: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    Ok(Json(summary))
+}
+
+/// Leaderboard: leaders with 30D stats (followers, buy/sell, volume, pnl_30d, win_rate)
+async fn leaderboard(
+    State(state): State<AppState>,
+    Query(q): Query<LeaderboardQuery>,
+) -> Result<Json<LeaderboardResponse>, StatusCode> {
+    let svc = match &state.subscriptions {
+        Some(s) => s,
+        None => return Err(StatusCode::SERVICE_UNAVAILABLE),
+    };
+
+    let period = q.period_days.clamp(1, 365);
+    let limit = q.limit.clamp(1, 200);
+    let offset = q.offset.max(0);
+
+    let items = svc
+        .list_leaderboard(period, limit, offset)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to list leaderboard: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    Ok(Json(LeaderboardResponse { data: items }))
+}
+
+/// Strategy leaderboard: aggregate by strategy in configured period
+async fn strategies_trending(
+    State(state): State<AppState>,
+    Query(q): Query<StrategiesTrendingQuery>,
+) -> Result<Json<StrategyTrendingResponse>, StatusCode> {
+    let svc = match &state.subscriptions {
+        Some(s) => s,
+        None => return Err(StatusCode::SERVICE_UNAVAILABLE),
+    };
+
+    let period = resolve_period_days(&q);
+    let limit = q.limit.clamp(1, 200);
+    let offset = q.offset.max(0);
+    let rank_by = resolve_rank_by(&q.rank_by);
+    let sort_order = resolve_sort_order(&q.order);
+    let category = resolve_category(&q.category);
+
+    let items = svc
+        .list_trending_strategies(period, limit, offset, rank_by, sort_order, category)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to list trending strategies: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    Ok(Json(StrategyTrendingResponse { data: items }))
+}
+
+/// Strategy detail: overview, current positions and activity logs
+async fn strategy_detail(
+    State(state): State<AppState>,
+    Path(strategy): Path<String>,
+    Query(q): Query<StrategyDetailQuery>,
+) -> Result<Json<StrategyDetail>, StatusCode> {
+    let svc = match &state.subscriptions {
+        Some(s) => s,
+        None => return Err(StatusCode::SERVICE_UNAVAILABLE),
+    };
+
+    let period = resolve_period_days_from_parts(q.period_days, &q.period);
+    let activity_limit = q.activity_limit.clamp(1, 200);
+
+    let detail = svc
+        .get_strategy_detail(&strategy, period, activity_limit)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to load strategy detail for {}: {}", strategy, e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    Ok(Json(detail))
+}
+
+/// Strategy performance chart data
+async fn strategy_performance(
+    State(state): State<AppState>,
+    Path(strategy): Path<String>,
+    Query(q): Query<StrategyPerformanceQuery>,
+) -> Result<Json<StrategyPerformanceSeries>, StatusCode> {
+    let svc = match &state.subscriptions {
+        Some(s) => s,
+        None => return Err(StatusCode::SERVICE_UNAVAILABLE),
+    };
+
+    let period = resolve_chart_period_days(q.period_days, &q.period);
+    let metric = resolve_performance_metric(&q.metric);
+    let interval = resolve_performance_interval(&q.interval);
+
+    let series = svc
+        .get_strategy_performance(&strategy, period, metric, interval)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to load strategy performance for {}: {}", strategy, e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    Ok(Json(series))
+}
+
+fn resolve_period_days(q: &StrategiesTrendingQuery) -> Option<i64> {
+    resolve_period_days_from_parts(q.period_days, &q.period)
+}
+
+fn resolve_period_days_from_parts(period_days: Option<i64>, period: &Option<String>) -> Option<i64> {
+    if let Some(days) = period_days {
+        return Some(days.clamp(1, 365));
+    }
+
+    match period
+        .as_deref()
+        .map(|v| v.trim().to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("7d") => Some(7),
+        Some("30d") => Some(30),
+        Some("all") => None,
+        _ => Some(30),
+    }
+}
+
+fn resolve_chart_period_days(period_days: Option<i64>, period: &Option<String>) -> Option<i64> {
+    if let Some(days) = period_days {
+        return Some(days.clamp(1, 365));
+    }
+
+    match period
+        .as_deref()
+        .map(|v| v.trim().to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("1w") => Some(7),
+        Some("1m") => Some(30),
+        Some("all") => None,
+        _ => Some(30),
+    }
+}
+
+fn resolve_rank_by(rank_by: &Option<String>) -> StrategyRankBy {
+    match rank_by
+        .as_deref()
+        .map(|v| v.trim().to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("followers") => StrategyRankBy::Followers,
+        Some("roi") => StrategyRankBy::Roi,
+        _ => StrategyRankBy::Pnl,
+    }
+}
+
+fn resolve_sort_order(order: &Option<String>) -> SortOrder {
+    match order
+        .as_deref()
+        .map(|v| v.trim().to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("asc") => SortOrder::Asc,
+        _ => SortOrder::Desc,
+    }
+}
+
+fn resolve_category(category: &Option<String>) -> Option<StrategyCategory> {
+    match category
+        .as_deref()
+        .map(|v| v.trim().to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("all") | None => None,
+        Some("grid") => Some(StrategyCategory::Grid),
+        Some("dca") => Some(StrategyCategory::Dca),
+        Some("martingale") => Some(StrategyCategory::Martingale),
+        Some("momentum") => Some(StrategyCategory::Momentum),
+        Some("arbitrage") => Some(StrategyCategory::Arbitrage),
+        Some("signal-based") | Some("signal_based") => Some(StrategyCategory::SignalBased),
+        _ => None,
+    }
+}
+
+fn resolve_performance_metric(metric: &Option<String>) -> StrategyPerformanceMetric {
+    match metric
+        .as_deref()
+        .map(|v| v.trim().to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("pnl") => StrategyPerformanceMetric::Pnl,
+        _ => StrategyPerformanceMetric::Roi,
+    }
+}
+
+fn resolve_performance_interval(interval: &Option<String>) -> StrategyPerformanceInterval {
+    match interval
+        .as_deref()
+        .map(|v| v.trim().to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("1h") => StrategyPerformanceInterval::Hour,
+        _ => StrategyPerformanceInterval::Day,
+    }
+}
+
+/// Agent (leader) detail: 7D stats, distribution, holdings by symbol, recent trades
+async fn agent_detail(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(q): Query<AgentDetailQuery>,
+) -> Result<Json<LeaderDetail>, StatusCode> {
+    let svc = match &state.subscriptions {
+        Some(s) => s,
+        None => return Err(StatusCode::SERVICE_UNAVAILABLE),
+    };
+
+    let trades_limit = q.trades_limit.clamp(1, 200);
+
+    let detail = svc
+        .get_leader_detail(&id, trades_limit)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to get leader detail: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    Ok(Json(detail))
 }
 
 fn is_token_valid(headers: &HeaderMap, expected: Option<&str>) -> bool {

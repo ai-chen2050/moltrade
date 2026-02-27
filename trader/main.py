@@ -442,6 +442,7 @@ class TradingBot:
                     self.signal_broadcaster.send_execution_report(
                         symbol=symbol,
                         side='long' if signal_type == 'buy' else 'short',
+                        strategy=self.strategy.name,
                         size=trade_size,
                         price=signal['price'],
                         status='simulated',
@@ -491,6 +492,7 @@ class TradingBot:
                 self.signal_broadcaster.send_execution_report(
                     symbol=symbol,
                     side='long' if is_buy else 'short',
+                    strategy=self.strategy.name,
                     size=trade_size,
                     price=signal['price'],
                     status='submitted',
@@ -599,8 +601,11 @@ class TradingBot:
         trading_cfg = self.config.get('trading', {})
         resolved_interval = interval or int(trading_cfg.get('refresh_interval_seconds', 300))
         symbol = symbol or trading_cfg.get('default_symbol')
+        candle_interval = str(trading_cfg.get('candle_interval', '1h'))
 
-        logger.info(f"🚀 Starting trading bot | Symbol: {symbol} | Refresh interval: {resolved_interval} seconds")
+        logger.info(
+            f"🚀 Starting trading bot | Symbol: {symbol} | Refresh interval: {resolved_interval} seconds | Candle interval: {candle_interval}"
+        )
 
         # In follower mode we only listen to copy-trade signals and skip strategy trading.
         if self.copytrade_cfg.get('enabled') and self.copytrade_role == 'follower':
@@ -632,7 +637,7 @@ class TradingBot:
         try:
             while True:
                 # Fetch market data
-                df = self.get_market_data(symbol)
+                df = self.get_market_data(symbol, interval=candle_interval)
 
                 if df.empty:
                     logger.warning("Unable to fetch market data")
@@ -785,6 +790,7 @@ def run_init(config_path: Path) -> None:
         trading.setdefault('exchange', 'hyperliquid')
         trading.setdefault('default_symbol', 'HYPE')
         trading.setdefault('default_strategy', 'test')
+        trading.setdefault('candle_interval', '1h')
         return
 
     # Copy-trade first (beginner default)
@@ -883,6 +889,7 @@ def run_init(config_path: Path) -> None:
         trading['exchange'] = prompt("Trading.exchange", trading.get('exchange', 'hyperliquid'))
         trading['default_symbol'] = prompt("Trading.default_symbol", trading.get('default_symbol', 'HYPE'))
         trading['default_strategy'] = prompt("Trading.default_strategy", trading.get('default_strategy', 'test'))
+        trading['candle_interval'] = prompt("Trading.candle_interval", trading.get('candle_interval', '1h'))
         print("Other trading/risk fields can be adjusted later in config.json.")
     else:
         ensure_trading_defaults_silent()

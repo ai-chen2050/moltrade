@@ -439,6 +439,7 @@ checksum = "145052bdd345b87320e369255277e3fb5152762ad123a901ef5c262dd38fe8d2"
 dependencies = [
  "iana-time-zone",
  "num-traits",
+ "serde",
  "windows-link 0.2.1",
 ]
 
@@ -1479,6 +1480,7 @@ dependencies = [
  "tokio",
  "tokio-postgres",
  "toml",
+ "tower-http",
  "tracing",
  "tracing-subscriber",
 ]

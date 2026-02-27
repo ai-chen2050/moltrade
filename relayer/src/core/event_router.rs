@@ -483,6 +483,7 @@ impl EventRouter {
             agent_eth_address: agent_eth.clone(),
             role: meta.role.clone(),
             symbol: meta.symbol.clone(),
+            strategy: meta.strategy.clone(),
             side: meta.side.clone(),
             size: meta.size,
             price: meta.price,
@@ -614,6 +615,7 @@ struct TradeMeta {
     tx_hash: Option<String>,
     oid: Option<String>,
     symbol: Option<String>,
+    strategy: Option<String>,
     side: Option<String>,
     size: Option<f64>,
     price: Option<f64>,
@@ -631,6 +633,7 @@ struct SignalMeta {
     follower_pubkey: Option<String>,
     role: Option<String>,
     symbol: Option<String>,
+    strategy: Option<String>,
     side: Option<String>,
     size: Option<f64>,
     price: Option<f64>,
@@ -661,6 +664,7 @@ impl EventRouter {
                 meta.follower_pubkey.as_deref(),
                 &meta.role,
                 meta.symbol.as_deref().unwrap_or(""),
+                meta.strategy.as_deref(),
                 meta.side.as_deref().unwrap_or(""),
                 meta.size.unwrap_or(0.0),
                 meta.price.unwrap_or(0.0),
@@ -705,6 +709,10 @@ fn extract_trade_meta(plaintext: &str) -> Option<TradeMeta> {
         .get("symbol")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
+    let strategy = parsed
+        .get("strategy")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
     let side = parsed
         .get("side")
         .and_then(|v| v.as_str())
@@ -746,6 +754,7 @@ fn extract_trade_meta(plaintext: &str) -> Option<TradeMeta> {
         tx_hash,
         oid,
         symbol,
+        strategy,
         side,
         size,
         price,
@@ -786,6 +795,10 @@ fn extract_signal_meta(plaintext: &str) -> SignalMeta {
         .get("symbol")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
+    let strategy = parsed
+        .get("strategy")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
     let side = parsed
         .get("side")
         .and_then(|v| v.as_str())
@@ -808,6 +821,7 @@ fn extract_signal_meta(plaintext: &str) -> SignalMeta {
         follower_pubkey,
         role,
         symbol,
+        strategy,
         side,
         size,
         price,

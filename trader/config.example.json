@@ -17,6 +17,7 @@
     "exchange": "hyperliquid",
     "default_symbol": "HYPE",
     "default_strategy": "test",
+    "candle_interval": "1h",
     "refresh_interval_seconds": 60,
     "position_size": 0.08,
     "max_position_size": 0.2,
