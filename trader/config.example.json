@@ -13,6 +13,14 @@
     "notify_errors": true,
     "notify_daily_summary": true
   },
+  "binance": {
+    "_comment": "Required when trading.exchange is 'binance'. Never commit real keys.",
+    "api_key": "$BINANCE_API_KEY",
+    "api_secret": "$BINANCE_API_SECRET",
+    "testnet_api_key": "$BINANCE_TESTNET_API_KEY",
+    "testnet_api_secret": "$BINANCE_TESTNET_API_SECRET",
+    "_testnet_note": "Testnet keys are generated at https://testnet.binance.vision — they are separate from mainnet keys."
+  },
   "trading": {
     "exchange": "hyperliquid",
     "default_symbol": "HYPE",

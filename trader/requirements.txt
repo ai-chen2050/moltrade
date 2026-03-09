@@ -7,3 +7,4 @@ websocket-client>=1.6.0
 eth-account>=0.9.0
 hyperliquid-python-sdk>=0.21.0
 pynostr>=0.7.0
+binance-sdk-spot>=7.2.0

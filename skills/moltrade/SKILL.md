@@ -89,6 +89,78 @@ clawhub install moltrade
 - Check `nostr` block: `nsec`, `relayer_nostr_pubkey`, `relays`, `sid`.
 - `SignalBroadcaster` is wired in `main.py`. In test mode, verify `send_trade_signal` / `send_execution_report` run without errors.
 
+## Binance Spot Support
+
+Moltrade supports Binance Spot trading via `binance-sdk-spot`. Set `trading.exchange` to `"binance"` in your config and provide API credentials.
+
+> **Related Skills** (raw API calls, not tied to the bot runtime):
+>
+> - [`binance/spot`](binance/spot/SKILL.md) — Binance Spot REST API skill: market data, order management, account info. Requires API key + secret; supports testnet and mainnet.
+> - [`binance/square-post`](binance/square-post/SKILL.md) — Binance Square social platform skill: post trading insights/signals as text content via the Square OpenAPI. Requires a Square OpenAPI key.
+
+### Install Binance SDK
+
+```bash
+pip install binance-sdk-spot
+```
+
+### Config Fields
+
+Add a `binance` block alongside the existing `trading` block:
+
+```json
+{
+  "trading": {
+    "exchange": "binance",
+    "default_symbol": "BTCUSDT",
+    "default_strategy": "momentum"
+  },
+  "binance": {
+    "api_key": "your_mainnet_api_key",
+    "api_secret": "your_mainnet_api_secret",
+    "testnet_api_key": "your_testnet_api_key",
+    "testnet_api_secret": "your_testnet_api_secret"
+  }
+}
+```
+
+> **Note**: Binance testnet uses keys generated separately at <https://testnet.binance.vision> (GitHub login required). Mainnet keys do **not** work on the testnet.
+
+### Testnet (–-test)
+
+When `--test` is passed the bot routes all requests to `testnet.binance.vision` and uses `binance.testnet_api_key` / `testnet_api_secret`. If testnet keys are absent it falls back to mainnet keys, which will cause auth errors against the testnet endpoint.
+
+```bash
+python trader/main.py --config config.json --test --strategy momentum --symbol BTCUSDT
+```
+
+### Live Trading
+
+```bash
+python trader/main.py --config config.json --strategy momentum --symbol BTCUSDT
+```
+
+### Backtest
+
+```bash
+python trader/backtest.py --config trader/config.example.json --strategy momentum --symbol BTCUSDT --interval 1h --limit 500
+```
+
+### Supported Interface
+
+`BinanceClient` (`trader/binance_api.py`) implements the same interface as `HyperliquidClient`:
+
+| Method                                                 | Description                                                   |
+| ------------------------------------------------------ | ------------------------------------------------------------- |
+| `get_candles(symbol, interval, limit)`                 | K-line data as `[ts, open, high, low, close, vol]`            |
+| `get_balance(asset)`                                   | Free balance for an asset (default `"USDT"`)                  |
+| `get_positions()`                                      | Non-zero asset balances (spot has no margin positions)        |
+| `get_open_orders()`                                    | All current open orders                                       |
+| `place_order(symbol, is_buy, size, price, order_type)` | LIMIT or MARKET order with auto lot-size / tick-size rounding |
+| `cancel_order(order_id, symbol)`                       | Cancel by order ID                                            |
+| `cancel_all_orders(symbol)`                            | Cancel all orders (optionally for one symbol)                 |
+| `get_ticker_price(symbol)`                             | Latest traded price                                           |
+
 ## Add Exchange Adapter
 
 - Implement adapter in `trader/exchanges/` matching `HyperliquidClient` interface (`get_candles`, `get_balance`, `get_positions`, `place_order`, etc.).

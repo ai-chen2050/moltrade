@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026.3.9
+
+### Changes
+
+- Add `trader/binance_api.py`: full Binance Spot exchange adapter (`BinanceClient`) using `binance-sdk-spot`, implementing the same interface as `HyperliquidClient` (`get_candles`, `get_balance`, `get_positions`, `place_order`, `cancel_order`, `cancel_all_orders`, etc.).
+- Update `trader/exchanges/factory.py`: register `"binance"` venue; reads `binance.api_key` / `binance.api_secret` from config and constructs `BinanceClient`; when `--test` is passed, prefers `binance.testnet_api_key` / `testnet_api_secret` (Binance testnet requires keys generated at testnet.binance.vision, separate from mainnet keys).
+- Update `trader/config.example.json`: add `binance` block with mainnet and testnet placeholder API key/secret fields.
+
+### Fixes
+
+- None noted for this date.
+
+---
+
 ## 2026.2.5
 
 ### Changes

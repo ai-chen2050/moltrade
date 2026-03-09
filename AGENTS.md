@@ -22,6 +22,7 @@
 - Trade insert/update handlers treat duplicate `tx_hash` as idempotent OK and map FK violations to 400 [relayer/src/api/rest_api.rs](relayer/src/api/rest_api.rs#L374-L459).
 - Daily subscription throttling enforced per bot ETH address; set `subscriptions.daily_limit` to zero to disable [relayer/src/api/rest_api.rs](relayer/src/api/rest_api.rs#L512-L520).
 - ETH addresses validated on bot registration [relayer/src/api/rest_api.rs](relayer/src/api/rest_api.rs#L503-L510).
+- **Changelog**: after any code change, update `CHANGELOG.md`.
 
 ## Integration Points
 
