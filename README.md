@@ -98,7 +98,7 @@ clawhub install moltrade
     ```bash
     git clone https://github.com/hetu-project/moltrade.git
     cd moltrade/trader
-    pip install -r requirements.txt  # Installs nostr, hyperliquid-py, etc.
+    pip install -r requirements.txt  # Installs nostr, hyperliquid-py, web3, py-clob-client, etc.
     ```
 2.  **Initialize Configuration**:
 

@@ -39,6 +39,7 @@ def main() -> None:
     assert sb.send_execution_report(
         symbol="ETH-USDC",
         side="buy",
+        strategy="demo",
         size=1,
         price=2500,
         status="filled",

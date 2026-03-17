@@ -21,6 +21,24 @@
     "testnet_api_secret": "$BINANCE_TESTNET_API_SECRET",
     "_testnet_note": "Testnet keys are generated at https://testnet.binance.vision — they are separate from mainnet keys."
   },
+  "uniswap": {
+    "_comment": "Required when trading.exchange is 'uniswap'.",
+    "rpc_url": "$ETH_RPC_URL",
+    "private_key": "$UNISWAP_PRIVATE_KEY",
+    "chain_id": 1,
+    "router_address": "0xE592427A0AEce92De3Edee1F18E0157C05861564",
+    "slippage_tolerance": 0.005,
+    "default_token_in": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+    "default_token_out": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+  },
+  "polymarket": {
+    "_comment": "Required when trading.exchange is 'polymarket'.",
+    "api_key": "$POLYMARKET_API_KEY",
+    "api_secret": "$POLYMARKET_API_SECRET",
+    "api_passphrase": "$POLYMARKET_API_PASSPHRASE",
+    "private_key": "$POLYMARKET_PRIVATE_KEY",
+    "chain_id": 137
+  },
   "trading": {
     "exchange": "hyperliquid",
     "default_symbol": "HYPE",

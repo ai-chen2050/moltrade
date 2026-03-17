@@ -83,6 +83,9 @@ To add your own, see `strategies/INTEGRATION.md` and register it in `get_strateg
 ## Exchanges
 
 - Default: Hyperliquid (wallet address + private key)
+- Binance: Spot trading (API key + API secret)
+- Uniswap: V3 DEX swaps on EVM chains (RPC URL + private key)
+- Polymarket: Prediction markets (API key + API secret + API passphrase + private key)
 - Extend: add an adapter in `exchanges/` implementing `get_candles`, `get_balance`, `get_positions`, `place_order`, then register in `exchanges/factory.py` and set `trading.exchange` in config.
 
 ## Nostr Signals (optional)

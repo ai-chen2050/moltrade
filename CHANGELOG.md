@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026.3.18
+
+### Changes
+
+- Add `trader/exchanges/uniswap_api.py`: Uniswap V3 DEX adapter implementing standard interface via `web3` for atomic swaps on EVM chains.
+- Add `trader/exchanges/polymarket_api.py`: Polymarket prediction market adapter utilizing `py-clob-client` SDK.
+- Update `trader/exchanges/factory.py` to support `"uniswap"` and `"polymarket"` exchange configurations.
+- Abstracted unified adapter interface compatibility in `trader/config.example.json` with added `uniswap` and `polymarket` blocks.
+- Update documentation and SKILL.md to detail configuration mapping for new trading venues.
+
+### Fixes
+
+- None noted for this date.
+
+---
+
 ## 2026.3.9
 
 ### Changes

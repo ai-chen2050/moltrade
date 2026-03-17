@@ -41,6 +41,9 @@ from pynostr.message_pool import MessagePool
 import tornado.ioloop
 from tornado import gen
 
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).resolve().parent.parent))
 from logging_config import get_logger
 from nostr.events import (
     TRADE_SIGNAL_KIND,
