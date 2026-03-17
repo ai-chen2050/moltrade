@@ -144,7 +144,7 @@ Accounts:
 2. **Prompt for key if missing**: If key is not configured, ask user to provide their API Key first
 3. **Prompt for content if missing**: If user triggers posting but doesn't provide specific content, ask what they want to post
 4. **Never display full keys**: Only show first 5 + last 4 characters (e.g., `abc12...xyz9`)
-5. **Store provided keys**: When user provides a new key, update the Accounts section in this file
+5. **Secure Key Configuration**: Instruct users to manage API keys securely via environment variables (e.g., export X_SQUARE_OPENAPI_KEY="..."). Never save credentials to this markdown file.
 6. **Optimize content before posting**:
    - Polish user's raw input for better readability
    - Show optimized content and ask user to choose: use optimized version or post original text

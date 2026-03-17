@@ -229,12 +229,7 @@ Base URLs:
 
 ### Share Credentials
 
-Users can provide Binance API credentials by sending a file where the content is in the following format:
-
-```bash
-abc123...xyz
-secret123...key
-```
+Users must provide Binance API credentials securely via their environment. Do not request users to paste keys directly into the chat or save them to any files within the repository.
 
 ### Never Display Full Secrets
 
@@ -262,40 +257,20 @@ When performing transactions in mainnet, always confirm with the user before pro
 
 ---
 
-## Binance Accounts
+## Environment Setup
 
-### main
-- API Key: your_mainnet_api_key
-- Secret: your_mainnet_secret
-- Testnet: false 
+Configure your execution environment by setting the following environment variables. Do not save keys directly to source files.
 
-### testnet-dev
-- API Key: your_testnet_api_key
-- Secret: your_testnet_secret
-- Testnet: true
-
-### TOOLS.md Structure
-
+**Mainnet**:
 ```bash
-## Binance Accounts
+export BINANCE_API_KEY="your_mainnet_api_key"
+export BINANCE_SECRET="your_mainnet_secret"
+```
 
-### main
-- API Key: abc123...xyz
-- Secret: secret123...key
-- Testnet: false
-- Description: Primary trading account
-
-### testnet-dev
-- API Key: test456...abc
-- Secret: testsecret...xyz
-- Testnet: true
-- Description: Development/testing
-
-### futures-keys
-- API Key: futures789...def
-- Secret: futuressecret...uvw
-- Testnet: false
-- Description: Futures trading account
+**Testnet**:
+```bash
+export BINANCE_TESTNET_API_KEY="your_testnet_api_key"
+export BINANCE_TESTNET_SECRET="your_testnet_secret"
 ```
 
 ## Agent Behavior
@@ -304,15 +279,7 @@ When performing transactions in mainnet, always confirm with the user before pro
 2. Listing accounts: Show names and environment, never keys
 3. Account selection: Ask if ambiguous, default to main
 4. When doing a transaction in mainnet, confirm with user before by asking to write "CONFIRM" to proceed
-5. New credentials: Prompt for name, environment, signing mode
-
-## Adding New Accounts
-
-When user provides new credentials:
-
-* Ask for account name
-* Ask: Mainnet, Testnet or Demo
-* Store in `TOOLS.md` with masked display confirmation 
+5. **Secure Configuration**: Guide users to export their environment variables rather than persisting new credentials to any repository file. Never edit `TOOLS.md` or `SKILL.md` to store keys. 
 
 ## Signing Requests
 

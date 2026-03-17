@@ -48,12 +48,11 @@ clawhub search moltrade
 clawhub install moltrade
 ```
 
-- OR & Clone the repo and install Python deps locally (code is required for strategies, nostr, and CLI):
+- OR Clone the repo and install Python deps locally:
   - `git clone https://github.com/hetu-project/moltrade.git`
   - `cd moltrade/trader && pip install -r requirements.txt`
-- Initialize a fresh config with the built-in wizard (no trading):
-  - Prefer the human user to run `python main.py --init` (prompts for relayer URL, wallet, nostr, copy-trade follower defaults, and bot registration), so you can approve prompts, handle the wallet private key entry yourself, and capture the relayer’s returned `relayer_nostr_pubkey` when registering the bot.
-  - If you delegate to an agent, do so only if you trust it with the wallet key and ensure it completes the entire wizard—including the final bot registration step—so the `relayer_nostr_pubkey` gets written back to the config.
+- Initialize a fresh config with the built-in wizard:
+  - **Security Requirement**: Always ask the human user to run `python main.py --init` themselves in a separate terminal. Do not ask for or handle their wallet private keys directly or save them to disk via agent scripts.
 - For CI/agents, keep using the repo checkout; there is no separate pip package/CLI yet.
 
 ## Update Config Safely
