@@ -77,6 +77,17 @@
 </table>
 </div>
 
+## **Supported Platforms**
+
+Moltrade supports various trading venues, extending from centralized to decentralized exchanges and prediction markets. You can select the active exchange by setting `"exchange"` within the `"trading"` block of your `config.json`.
+
+- **Hyperliquid** (Default): Decentralized perpetual exchange. Requires wallet address and private key. (`"exchange": "hyperliquid"`)
+- **Binance**: Centralized spot trading. Requires and API key and API secret. (`"exchange": "binance"`)
+- **Uniswap V3**: Decentralized EVM spot swaps. Requires an RPC URL and a wallet private key. (`"exchange": "uniswap"`)
+- **Polymarket**: Prediction markets. Requires Polymarket API credentials and a wallet private key. (`"exchange": "polymarket"`)
+
+See the [Trader Documentation](trader/README.md) for detailed configuration schemas and platform-specific requirements.
+
 ## **Getting Started**
 
 **Prerequisites**
